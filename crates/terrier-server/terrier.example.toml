@@ -1,0 +1,36 @@
+# Example terrier configuration. Copy to terrier.toml (or point
+# TERRIER_CONFIG at it). On NixOS the services.terrier module generates it.
+
+listen = "0.0.0.0:4810"
+db_path = "terrier.db"
+
+[scrape]
+failure_alert_after = 5      # consecutive source failures before an ntfy alert
+renotify_drop_pct = 1.0      # push again when a match's price drops ≥ 1%
+max_search_locations = 20    # search locations merged into the scrape rotation
+
+# ---- Leboncoin ventes_immobilières (the flagship source) ----
+# Searches per location; active searches' locations are added on top of
+# this baseline automatically. price_cents + structured attributes
+# (surface, pièces, DPE, terrain) come straight from the page JSON.
+# [leboncoin]
+# enabled = true
+# locations = ["Rennes 35000"]   # "Ville CP" or bare CP/commune
+# pages_per_location = 1         # 35 annonces per page
+# delay_ms = 3000
+# interval_minutes = 60
+
+# ---- Ouest France Immo (EXPERIMENTAL) ----
+# Bot-walled: works only through an external stealth fetcher.
+# [ouestfrance]
+# enabled = true
+# locations = ["Rennes 35000"]
+# delay_ms = 5000
+# interval_minutes = 120
+# fetch_command = ["/var/lib/terrier/venv/bin/python", "/var/lib/terrier/stealth-fetch.py", "{url}"]
+
+# ---- ntfy notifications ----
+# [notifications]
+# ntfy_url = "https://notify.zeus.balem.fr"
+# topic = "terrier"
+# token_file = "/run/agenix/terrier-ntfy-token"

@@ -1,0 +1,32 @@
+[package]
+name = "terrier-server"
+description = "terrier server: immo scraper, pipeline, storage, REST API"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+terrier-domain.workspace = true
+anyhow.workspace = true
+async-trait.workspace = true
+axum.workspace = true
+chrono.workspace = true
+figment.workspace = true
+futures.workspace = true
+regex.workspace = true
+reqwest.workspace = true
+scraper.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tower.workspace = true
+tower-http.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+url.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
+http-body-util = "0.1"

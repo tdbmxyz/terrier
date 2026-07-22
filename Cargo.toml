@@ -1,0 +1,58 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/terrier-domain",
+    "crates/terrier-server",
+    "crates/terrier-client",
+    "crates/terrier-ui",
+    "crates/terrier-web",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+authors = ["Tibo <thibaudbalem@gmail.com>"]
+repository = "https://github.com/tdbmxyz/terrier"
+
+[workspace.dependencies]
+# internal crates
+terrier-domain = { path = "crates/terrier-domain" }
+terrier-client = { path = "crates/terrier-client" }
+terrier-ui = { path = "crates/terrier-ui" }
+
+# shared
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["serde", "v4", "js"] }
+url = { version = "2", features = ["serde"] }
+thiserror = "2"
+regex = "1"
+
+# server
+anyhow = "1"
+futures = "0.3"
+axum = "0.8"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "sync", "time", "process"] }
+tower = { version = "0.5", features = ["util"] }
+tower-http = { version = "0.6", features = ["trace", "cors", "fs"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+figment = { version = "0.10", features = ["toml", "env"] }
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite", "chrono", "migrate", "derive", "macros"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "gzip"] }
+scraper = "0.23"
+async-trait = "0.1"
+
+# frontend
+leptos = { version = "0.8", features = ["csr"] }
+console_error_panic_hook = "0.1"
+web-sys = "0.3"
+js-sys = "0.3"
+# pinned exactly: the wasm-bindgen CLI from nixpkgs must match (not semver-stable)
+wasm-bindgen = "=0.2.126"
+wasm-bindgen-futures = "0.4"
+
+[profile.release]
+lto = "thin"
+strip = true

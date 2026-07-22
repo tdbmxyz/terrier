@@ -1,0 +1,13 @@
+[package]
+name = "terrier-domain"
+description = "Shared domain types and matching logic for terrier"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+url.workspace = true
+regex.workspace = true

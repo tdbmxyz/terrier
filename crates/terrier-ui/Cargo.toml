@@ -1,0 +1,14 @@
+[package]
+name = "terrier-ui"
+description = "Leptos component library for terrier"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+terrier-domain.workspace = true
+terrier-client.workspace = true
+leptos.workspace = true
+chrono.workspace = true
+url.workspace = true
+uuid.workspace = true
+web-sys = { workspace = true, features = ["Window", "Storage", "Location"] }

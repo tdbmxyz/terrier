@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>terrier</title>
+    <link rel="stylesheet" href="/styles-13f53bba156455c2.css" integrity="sha384-x0UlZ860OGe68OHfLT4v6bZ1rVKBoe33cBgkKSp4+W9Z+MMnRMNodpXbsB7sMglD"/>
+    
+    <link rel="icon" type="image/svg+xml" href="/assets/logo.svg" />
+    
+  <link rel="modulepreload" href="/terrier-web-2904ca544877a662.js" crossorigin="anonymous" integrity="sha384-iz6ER+BMzwb++UUNvgGyF44tUgWpMpt+8v7HGmw+MzvCnl/YC/7SHLkb41vSAkhm"><link rel="preload" href="/terrier-web-2904ca544877a662_bg.wasm" crossorigin="anonymous" integrity="sha384-d5i2UEYAWvdY4V08K7Gk1yA68AnVGw+cK6DkVZmxofBTOfARhmkCkj8elOA1IqSZ" as="fetch" type="application/wasm"></head>
+  <body>
+<script type="module">
+import init, * as bindings from '/terrier-web-2904ca544877a662.js';
+const wasm = await init({ module_or_path: '/terrier-web-2904ca544877a662_bg.wasm' });
+
+
+window.wasmBindings = bindings;
+
+
+dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
+
+</script></body>
+</html>

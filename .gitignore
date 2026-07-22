@@ -1,0 +1,8 @@
+/target
+*.db
+*.db-shm
+*.db-wal
+terrier.toml
+/result
+/result-*
+*.apk

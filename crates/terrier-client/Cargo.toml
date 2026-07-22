@@ -1,0 +1,13 @@
+[package]
+name = "terrier-client"
+description = "Typed HTTP client for the terrier API (native + wasm)"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+terrier-domain.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+url.workspace = true
+uuid.workspace = true

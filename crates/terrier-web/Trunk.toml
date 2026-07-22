@@ -1,0 +1,13 @@
+[build]
+target = "index.html"
+dist = "dist"
+
+[serve]
+# Trunk serves the frontend in dev...
+addresses = ["127.0.0.1"]
+port = 8082
+
+# ...and proxies API calls to a locally running terrier-server,
+# so the frontend can always talk to its own origin.
+[[proxy]]
+backend = "http://127.0.0.1:4810/api"

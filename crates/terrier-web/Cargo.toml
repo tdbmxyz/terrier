@@ -1,0 +1,13 @@
+[package]
+name = "terrier-web"
+description = "Web entrypoint: mounts terrier-ui in the browser (built by trunk)"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+terrier-ui.workspace = true
+console_error_panic_hook.workspace = true
+leptos.workspace = true
+url.workspace = true
+web-sys = { workspace = true, features = ["Window", "Location", "Storage"] }
+js-sys.workspace = true
