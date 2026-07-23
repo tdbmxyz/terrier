@@ -1,0 +1,42 @@
+{
+  "list_id": 3138407746,
+  "subject": "Appartement 3 pièces 80 m²",
+  "body": "Appartement 3 pièces 80 m² au coeur de Rennes.\n\nCopropriété de 24 lots. Fibre optique installée. Idéal investisseur, locataire en place.",
+  "url": "https://www.leboncoin.fr/ad/ventes_immobilieres/3138407746",
+  "status": "active",
+  "location": {
+    "city": "Rennes",
+    "zipcode": "35000",
+    "city_label": "Rennes 35000 Bourg l'Év. la Touche",
+    "district": "Bourg l'Év. la Touche",
+    "lat": 48.11673,
+    "lng": -1.69503
+  },
+  "owner": {
+    "type": "pro",
+    "name": "Mon Partenaire Immobilier",
+    "siren": "833292865"
+  },
+  "images": {
+    "urls_large": [
+      "https://img.leboncoin.fr/api/v1/lbcpb1/images/ad-1.jpg",
+      "https://img.leboncoin.fr/api/v1/lbcpb1/images/ad-2.jpg",
+      "https://img.leboncoin.fr/api/v1/lbcpb1/images/ad-3.jpg"
+    ]
+  },
+  "attributes": [
+    { "key": "real_estate_type", "value": "2", "value_label": "Appartement" },
+    { "key": "square", "value": "80", "value_label": "80 m²" },
+    { "key": "rooms", "value": "3", "value_label": "3" },
+    { "key": "building_year", "value": "1960", "value_label": "1960" },
+    { "key": "heating_type", "value": "individual", "value_label": "Individuel" },
+    { "key": "heating_mode", "value": "gas", "value_label": "Gaz" },
+    { "key": "global_condition", "value": "2", "value_label": "Bon état" },
+    { "key": "annual_charges", "value": "1200", "value_label": "1200 €" },
+    { "key": "property_tax", "value": "600", "value_label": "600 €" },
+    { "key": "floor_number", "value": "2", "value_label": "2" },
+    { "key": "elevator", "value": "1", "value_label": "Oui" },
+    { "key": "orientation", "value": "south_east", "value_label": "Sud-Est" },
+    { "key": "specificities", "value": "", "value_label": "Avec garage ou place de parking, Cave" }
+  ]
+}

@@ -136,7 +136,13 @@ pub async fn process_one(
                 })
                 .await
             {
-                Ok(attrs) => db.set_attributes(id, &attrs).await?,
+                // Structured attributes from the detail page (already stored)
+                // are authoritative; the LLM only fills the prose-only gaps.
+                Ok(attrs) => {
+                    let mut merged = state.listing.attributes.clone();
+                    merged.fill_gaps_from(&attrs);
+                    db.set_attributes(id, &merged).await?
+                }
                 Err(e) => {
                     tracing::warn!(%id, error = %e, "llm extraction failed");
                     step_errors.push(format!("extract: {e}"));
@@ -321,6 +327,43 @@ mod tests {
             "query string stripped"
         );
         assert_eq!(db.enrichment_depth().await.unwrap(), 0, "dequeued");
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[tokio::test]
+    async fn structured_attributes_win_over_llm_which_fills_gaps() {
+        let tmp = std::env::temp_dir().join(format!("terrier-test-{}", Uuid::new_v4()));
+        // detail carries authoritative structured facts
+        let detail = ListingDetail {
+            description: Some("the full description".into()),
+            attributes: ExtractedAttrs {
+                chauffage_energie: Some("gaz".into()),
+                orientation: Some("sud".into()),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let (db, id) = setup().await;
+        let source = FakeSource {
+            detail: Some(detail),
+            fail: false,
+        };
+        // FakeLlm returns fibre=true (prose-only) and nothing else, so the
+        // structured chauffage/orientation must survive and fibre be adopted.
+        let llm_impl = Arc::new(FakeLlm {
+            calls: Mutex::new(0),
+            expect: "full description",
+        });
+        let llm = llm_handle(Some(llm_impl.clone()));
+
+        process_one(&db, &source, &FakeImages, &llm, &config(&tmp), id)
+            .await
+            .unwrap();
+
+        let attrs = db.enrichment_state(id).await.unwrap().listing.attributes;
+        assert_eq!(attrs.chauffage_energie.as_deref(), Some("gaz"));
+        assert_eq!(attrs.orientation.as_deref(), Some("sud"));
+        assert_eq!(attrs.fibre, Some(true), "prose-only fact from the llm");
         std::fs::remove_dir_all(&tmp).ok();
     }
 

@@ -5,7 +5,7 @@
 //! falls back to a curl subprocess with the same headers (proven in
 //! ferret against the same host).
 
-use terrier_domain::{PropertyType, RawListing, Seller, SellerKind};
+use terrier_domain::{ExtractedAttrs, ListingDetail, PropertyType, RawListing, Seller, SellerKind};
 use url::Url;
 
 use crate::config::LeboncoinConfig;
@@ -16,6 +16,9 @@ use tower::{Service, ServiceExt};
 
 pub const SOURCE_ID: &str = "leboncoin-immo";
 const SEARCH_URL: &str = "https://www.leboncoin.fr/recherche";
+/// The ad HTML page is DataDome-walled; this JSON endpoint isn't, and returns
+/// the ad object at the top level (not nested under props.pageProps.ad).
+const DETAIL_API: &str = "https://api.leboncoin.fr/finder/classified";
 
 const USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 \
                           (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
@@ -57,6 +60,110 @@ fn attr<'a>(ad: &'a serde_json::Value, key: &str) -> Option<&'a str> {
             None
         }
     })
+}
+
+/// The human-readable `value_label` of an attribute (e.g. "Bon état"),
+/// where the raw `value` is an opaque code.
+fn attr_label<'a>(ad: &'a serde_json::Value, key: &str) -> Option<&'a str> {
+    ad["attributes"].as_array()?.iter().find_map(|a| {
+        if a["key"].as_str() == Some(key) {
+            a["value_label"].as_str()
+        } else {
+            None
+        }
+    })
+}
+
+fn attr_i64(ad: &serde_json::Value, key: &str) -> Option<i64> {
+    attr(ad, key).and_then(|s| s.parse().ok())
+}
+
+/// Map Leboncoin's English enum codes to the same lowercase French vocabulary
+/// the LLM prompt produces, so structured and extracted values render alike.
+fn heating_type_fr(code: &str) -> Option<String> {
+    Some(
+        match code {
+            "individual" => "individuel",
+            "collective" => "collectif",
+            _ => return None,
+        }
+        .into(),
+    )
+}
+
+fn heating_energy_fr(code: &str) -> Option<String> {
+    Some(
+        match code {
+            "gas" => "gaz",
+            "electric" => "electrique",
+            "fuel" | "oil" => "fioul",
+            "wood" => "bois",
+            "heat_pump" => "pompe à chaleur",
+            _ => return None,
+        }
+        .into(),
+    )
+}
+
+fn orientation_fr(code: &str) -> Option<String> {
+    Some(
+        match code {
+            "north" => "nord",
+            "south" => "sud",
+            "east" => "est",
+            "west" => "ouest",
+            "north_east" => "nord-est",
+            "north_west" => "nord-ouest",
+            "south_east" => "sud-est",
+            "south_west" => "sud-ouest",
+            _ => return None,
+        }
+        .into(),
+    )
+}
+
+/// `global_condition`'s label → the `travaux` enum ("a-prevoir" | ...).
+fn condition_to_travaux(label: &str) -> Option<String> {
+    let l = label.to_lowercase();
+    if l.contains("rénov") || l.contains("refaire") || l.contains("travaux") {
+        Some("a-prevoir".into())
+    } else if l.contains("rafraîch") || l.contains("rafraich") {
+        Some("rafraichissement".into())
+    } else if l.contains("bon état") || l.contains("neuf") {
+        Some("aucun".into())
+    } else {
+        None
+    }
+}
+
+fn garage_parking(ad: &serde_json::Value) -> Option<bool> {
+    if attr_i64(ad, "nb_parkings").unwrap_or(0) > 0 {
+        return Some(true);
+    }
+    let spec = attr_label(ad, "specificities")?.to_lowercase();
+    (spec.contains("garage") || spec.contains("parking")).then_some(true)
+}
+
+/// The facts Leboncoin exposes structurally in the ad's `attributes` array —
+/// more reliable than LLM prose extraction, so these win over it. Only the
+/// unambiguous fields are taken; genuinely prose-only facts (fibre, piscine,
+/// mitoyenne, jardin, notes) are left to the extractor.
+fn ad_attributes(ad: &serde_json::Value) -> ExtractedAttrs {
+    ExtractedAttrs {
+        annee_construction: attr_i64(ad, "building_year"),
+        travaux: attr_label(ad, "global_condition").and_then(condition_to_travaux),
+        chauffage_type: attr(ad, "heating_type").and_then(heating_type_fr),
+        chauffage_energie: attr(ad, "heating_mode").and_then(heating_energy_fr),
+        // annual_charges is in euros/year; ExtractedAttrs stores cents/month
+        charges_copro_month_cents: attr_i64(ad, "annual_charges").map(|y| y * 100 / 12),
+        taxe_fonciere_year_cents: attr_i64(ad, "property_tax").map(|e| e * 100),
+        etage: attr_i64(ad, "floor_number"),
+        // elevator: "1" = Oui, "2" = Non
+        ascenseur: attr(ad, "elevator").map(|v| v == "1"),
+        garage_parking: garage_parking(ad),
+        orientation: attr(ad, "orientation").and_then(orientation_fr),
+        ..Default::default()
+    }
 }
 
 fn property_type(ad: &serde_json::Value) -> PropertyType {
@@ -175,23 +282,50 @@ pub fn parse_search_page(html: &str) -> anyhow::Result<Vec<RawListing>> {
     Ok(listings)
 }
 
-/// The ad detail page: full body, complete image set, seller, street.
-pub fn parse_ad_page(html: &str) -> anyhow::Result<terrier_domain::ListingDetail> {
-    let data = next_data(html)?;
-    let ad = &data["props"]["pageProps"]["ad"];
-    anyhow::ensure!(
-        ad.is_object(),
-        "no props.pageProps.ad (blocked page or new layout)"
-    );
-    Ok(terrier_domain::ListingDetail {
+/// Build a `ListingDetail` from a top-level ad object (finder API shape).
+fn ad_detail(ad: &serde_json::Value) -> ListingDetail {
+    ListingDetail {
         description: ad["body"].as_str().map(str::to_string),
-        address: ad["location"]["street"]
+        // The API carries no street; the district is the finest relative
+        // address available (e.g. "Bourg l'Év. la Touche").
+        address: ad["location"]["district"]
             .as_str()
-            .or_else(|| ad["location"]["address"].as_str())
+            .or_else(|| ad["location"]["city_label"].as_str())
             .map(str::to_string),
         image_urls: image_urls(ad),
         seller: seller(ad),
-    })
+        attributes: ad_attributes(ad),
+    }
+}
+
+/// Parse the JSON body of `api.leboncoin.fr/finder/classified/<id>`, whose ad
+/// object sits at the top level — unlike the DataDome-walled HTML ad page,
+/// which nested it under `props.pageProps.ad`. Full body, complete image set,
+/// seller, relative address, and structured attributes.
+pub fn parse_ad_json(body: &str) -> anyhow::Result<ListingDetail> {
+    let ad: serde_json::Value = serde_json::from_str(body)?;
+    // A DataDome block or error payload lacks both — treat as a hard error so
+    // backoff/alerting kicks in instead of storing an empty detail.
+    anyhow::ensure!(
+        ad["list_id"].is_number() || ad["body"].is_string(),
+        "not a finder ad payload (blocked or unexpected shape)"
+    );
+    Ok(ad_detail(&ad))
+}
+
+/// The trailing numeric path segment of a Leboncoin ad URL is its list_id.
+fn list_id_of(url: &str) -> Option<&str> {
+    url.split(['?', '#'])
+        .next()
+        .unwrap_or(url)
+        .trim_end_matches('/')
+        .rsplit('/')
+        .next()
+        .filter(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()))
+}
+
+fn detail_api_url(list_id: &str) -> String {
+    format!("{DETAIL_API}/{list_id}")
 }
 
 pub struct LeboncoinSource {
@@ -290,12 +424,13 @@ impl ImmoSource for LeboncoinSource {
         Ok(all)
     }
 
-    async fn fetch_detail(
-        &self,
-        url: &str,
-    ) -> anyhow::Result<Option<terrier_domain::ListingDetail>> {
-        let html = self.fetch_page(url).await?;
-        Ok(Some(parse_ad_page(&html)?))
+    async fn fetch_detail(&self, url: &str) -> anyhow::Result<Option<ListingDetail>> {
+        let Some(list_id) = list_id_of(url) else {
+            tracing::warn!(url, "leboncoin: no list_id in ad url, skipping detail");
+            return Ok(None);
+        };
+        let body = self.fetch_page(&detail_api_url(list_id)).await?;
+        Ok(Some(parse_ad_json(&body)?))
     }
 }
 
@@ -366,9 +501,10 @@ mod tests {
     }
 
     #[test]
-    fn parses_ad_detail_page() {
-        let html = include_str!("../../tests/fixtures/leboncoin_immo_ad.html");
-        let d = parse_ad_page(html).unwrap();
+    fn parses_ad_detail_json() {
+        // fixture mirrors a REAL api.leboncoin.fr/finder/classified capture
+        let json = include_str!("../../tests/fixtures/leboncoin_immo_ad.json");
+        let d = parse_ad_json(json).unwrap();
         assert!(
             d.description
                 .as_deref()
@@ -376,19 +512,55 @@ mod tests {
                 .contains("Copropriété de 24 lots")
         );
         assert_eq!(d.image_urls.len(), 3);
-        assert_eq!(d.address.as_deref(), Some("Rue de la Monnaie"));
-        assert_eq!(
-            d.seller.as_ref().unwrap().siren.as_deref(),
-            Some("123456789")
-        );
+        assert!(d.image_urls[0].ends_with("ad-1.jpg"));
+        assert_eq!(d.address.as_deref(), Some("Bourg l'Év. la Touche"));
+        let seller = d.seller.as_ref().unwrap();
+        assert_eq!(seller.kind, SellerKind::Pro);
+        assert_eq!(seller.siren.as_deref(), Some("833292865"));
+
+        // structured attributes, mapped to the LLM's French vocabulary
+        let a = &d.attributes;
+        assert_eq!(a.annee_construction, Some(1960));
+        assert_eq!(a.travaux.as_deref(), Some("aucun"));
+        assert_eq!(a.chauffage_type.as_deref(), Some("individuel"));
+        assert_eq!(a.chauffage_energie.as_deref(), Some("gaz"));
+        assert_eq!(a.charges_copro_month_cents, Some(1200 * 100 / 12));
+        assert_eq!(a.taxe_fonciere_year_cents, Some(60_000));
+        assert_eq!(a.etage, Some(2));
+        assert_eq!(a.ascenseur, Some(true));
+        assert_eq!(a.orientation.as_deref(), Some("sud-est"));
+        assert_eq!(a.garage_parking, Some(true), "from specificities label");
+        // prose-only facts stay for the extractor
+        assert_eq!(a.fibre, None);
+        assert_eq!(a.piscine, None);
+        assert!(a.notes.is_empty());
     }
 
     #[test]
-    fn blocked_ad_page_is_a_hard_error() {
-        assert!(parse_ad_page("<html>datadome says no</html>").is_err());
-        // page with __NEXT_DATA__ but no ad (layout change) is also an error
-        let html = r#"<script id="__NEXT_DATA__" type="application/json">{"props":{}}</script>"#;
-        assert!(parse_ad_page(html).is_err());
+    fn blocked_or_malformed_ad_json_is_a_hard_error() {
+        assert!(parse_ad_json("<html>datadome says no</html>").is_err());
+        // valid JSON but not an ad payload (e.g. an error object)
+        assert!(parse_ad_json(r#"{"error": "forbidden"}"#).is_err());
+    }
+
+    #[test]
+    fn list_id_extracted_from_ad_url() {
+        assert_eq!(
+            list_id_of("https://www.leboncoin.fr/ad/ventes_immobilieres/3138407746"),
+            Some("3138407746")
+        );
+        assert_eq!(
+            list_id_of("https://www.leboncoin.fr/ad/ventes_immobilieres/3138407746/"),
+            Some("3138407746")
+        );
+        assert_eq!(
+            list_id_of("https://www.leboncoin.fr/recherche?foo=bar"),
+            None
+        );
+        assert_eq!(
+            detail_api_url("3138407746"),
+            "https://api.leboncoin.fr/finder/classified/3138407746"
+        );
     }
 
     #[test]

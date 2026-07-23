@@ -717,16 +717,30 @@ impl Db {
     /// Merge a detail fetch over the listing; marks the listing enriched.
     /// Returns true when the description changed (extraction re-triggers).
     pub async fn set_detail(&self, id: Uuid, d: &terrier_domain::ListingDetail) -> Result<bool> {
-        let stored: Option<String> = sqlx::query("SELECT description FROM listings WHERE id = ?")
+        let row = sqlx::query("SELECT description, attributes FROM listings WHERE id = ?")
             .bind(id.to_string())
             .fetch_optional(&self.pool)
             .await?
-            .ok_or(DbError::NotFound)?
-            .get("description");
+            .ok_or(DbError::NotFound)?;
+        let stored: Option<String> = row.get("description");
         let changed = d.description.is_some() && d.description != stored;
         if !d.image_urls.is_empty() {
             self.add_image_urls(id, &d.image_urls).await?;
         }
+
+        // Structured attributes win over whatever's stored (typically LLM
+        // output), but keep the prose-only fields the source didn't provide —
+        // so a re-enrich that skips the LLM (description unchanged) never drops
+        // fibre/piscine/notes. An empty `attributes` (non-LBC source) is a
+        // no-op merge that leaves the stored value untouched.
+        let existing: terrier_domain::ExtractedAttrs = row
+            .get::<Option<String>, _>("attributes")
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default();
+        let mut merged = d.attributes.clone();
+        merged.fill_gaps_from(&existing);
+        let attributes = serde_json::to_string(&merged).expect("attrs serialize");
+
         let (s_name, s_type, s_siren) = seller_cols(&d.seller);
         sqlx::query(
             "UPDATE listings SET
@@ -735,6 +749,7 @@ impl Db {
                  seller_name = COALESCE(?, seller_name),
                  seller_type = COALESCE(?, seller_type),
                  siren = COALESCE(?, siren),
+                 attributes = ?,
                  enriched_at = ?,
                  extracted_at = CASE WHEN ? THEN NULL ELSE extracted_at END
              WHERE id = ?",
@@ -744,6 +759,7 @@ impl Db {
         .bind(s_name)
         .bind(s_type)
         .bind(s_siren)
+        .bind(attributes)
         .bind(Utc::now().to_rfc3339())
         .bind(changed)
         .bind(id.to_string())

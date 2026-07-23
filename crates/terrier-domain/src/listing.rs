@@ -122,10 +122,46 @@ impl ExtractedAttrs {
     pub fn is_empty(&self) -> bool {
         *self == Self::default()
     }
+
+    /// Fill this value's gaps from `other`: for every `Option` field that is
+    /// `None` here, adopt `other`'s; `notes` is taken from `other` only when
+    /// empty here. `self` always wins where it already has a value — used to
+    /// let authoritative structured attributes take precedence over the LLM's
+    /// prose extraction while still adopting the fields structure didn't cover.
+    pub fn fill_gaps_from(&mut self, other: &ExtractedAttrs) {
+        macro_rules! fill {
+            ($($f:ident),+ $(,)?) => { $(
+                if self.$f.is_none() {
+                    self.$f = other.$f.clone();
+                }
+            )+ };
+        }
+        fill!(
+            annee_construction,
+            travaux,
+            chauffage_type,
+            chauffage_energie,
+            fibre,
+            charges_copro_month_cents,
+            taxe_fonciere_year_cents,
+            etage,
+            ascenseur,
+            jardin,
+            garage_parking,
+            piscine,
+            orientation,
+            mitoyenne,
+        );
+        if self.notes.is_empty() {
+            self.notes = other.notes.clone();
+        }
+    }
 }
 
 /// What a detail-page fetch yields — everything optional, merged over the
-/// stored listing (None never clears a stored value).
+/// stored listing (None never clears a stored value). `attributes` carries
+/// facts the source exposes structurally (e.g. Leboncoin's `attributes`
+/// array), which are more reliable than LLM prose extraction and win over it.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ListingDetail {
@@ -133,6 +169,7 @@ pub struct ListingDetail {
     pub address: Option<String>,
     pub image_urls: Vec<String>,
     pub seller: Option<Seller>,
+    pub attributes: ExtractedAttrs,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -244,6 +281,45 @@ pub struct RawListing {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fill_gaps_keeps_own_values_and_adopts_missing() {
+        // structured (authoritative): heating + orientation known, no prose facts
+        let mut structured = ExtractedAttrs {
+            chauffage_energie: Some("gaz".into()),
+            orientation: Some("sud".into()),
+            etage: Some(2),
+            ..Default::default()
+        };
+        // LLM: disagrees on orientation (loses), adds prose-only fibre/notes
+        let llm = ExtractedAttrs {
+            chauffage_energie: Some("electrique".into()),
+            orientation: Some("nord".into()),
+            fibre: Some(true),
+            notes: vec!["locataire en place".into()],
+            ..Default::default()
+        };
+        structured.fill_gaps_from(&llm);
+
+        assert_eq!(structured.chauffage_energie.as_deref(), Some("gaz"));
+        assert_eq!(structured.orientation.as_deref(), Some("sud"));
+        assert_eq!(structured.etage, Some(2));
+        assert_eq!(structured.fibre, Some(true), "adopted from llm");
+        assert_eq!(structured.notes, vec!["locataire en place".to_string()]);
+    }
+
+    #[test]
+    fn fill_gaps_does_not_replace_existing_notes() {
+        let mut a = ExtractedAttrs {
+            notes: vec!["servitude".into()],
+            ..Default::default()
+        };
+        a.fill_gaps_from(&ExtractedAttrs {
+            notes: vec!["other".into()],
+            ..Default::default()
+        });
+        assert_eq!(a.notes, vec!["servitude".to_string()]);
+    }
 
     fn sample_listing() -> Listing {
         Listing {
