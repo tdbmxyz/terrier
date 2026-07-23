@@ -52,9 +52,7 @@ pub struct OpenAiExtractor {
 
 // ---- runtime configuration: TOML base + DB override, hot-swappable ----
 
-#[allow(dead_code)] // callers arrive with the enrichment worker / api tasks
 pub const LLM_SETTINGS_KEY: &str = "llm";
-#[allow(dead_code)] // callers arrive with the enrichment worker / api tasks
 pub const PROMPTS_SETTINGS_KEY: &str = "prompts";
 
 /// Fully resolved LLM configuration, ready to build clients from.
@@ -113,9 +111,7 @@ pub fn effective(base: &LlmConfig, o: Option<&LlmSettingsUpdate>) -> anyhow::Res
 pub struct LlmRuntime {
     pub extractor: Option<std::sync::Arc<dyn LlmExtract>>,
     pub status: LlmStatus,
-    #[allow(dead_code)] // callers arrive with the api task
     pub settings: LlmSettings,
-    #[allow(dead_code)] // callers arrive with the api task
     pub prompts: LlmPrompts,
     pub busy: std::sync::Arc<std::sync::atomic::AtomicU32>,
 }
@@ -174,7 +170,6 @@ pub async fn load_prompts(db: &crate::db::Db) -> Option<LlmPrompts> {
 
 // ---- system prompt: default here, user-overridable via settings ----
 
-#[allow(dead_code)] // callers arrive with the enrichment worker / api tasks
 pub const EXTRACT_PROMPT: &str =
     "You extract structured facts from a French real-estate SALE listing for \
      a price tracker. Fill ONLY what the text explicitly states — never \
@@ -196,7 +191,6 @@ pub const EXTRACT_PROMPT: &str =
        zone inondable, travaux de copropriété votés…).\n\
      Answer only with the JSON object.";
 
-#[allow(dead_code)] // callers arrive with the enrichment worker / api tasks
 pub fn default_prompts() -> LlmPrompts {
     LlmPrompts { extract: EXTRACT_PROMPT.into() }
 }
@@ -216,7 +210,6 @@ pub fn effective_prompts(stored: Option<&LlmPrompts>) -> LlmPrompts {
 
 /// The JSON schema the model must answer with (strict structured output).
 /// Money is asked in EUROS — models mangle cents; conversion happens here.
-#[allow(dead_code)] // callers arrive with the enrichment worker / api tasks
 fn response_schema() -> serde_json::Value {
     serde_json::json!({
         "type": "object",
@@ -290,7 +283,6 @@ impl From<RawExtraction> for ExtractedAttrs {
     }
 }
 
-#[allow(dead_code)] // callers arrive with the enrichment worker / api tasks
 pub(crate) fn request_body(
     model: &str,
     input: &ExtractInput<'_>,
@@ -323,7 +315,6 @@ pub(crate) fn request_body(
 }
 
 /// The assistant text of a chat-completions response body.
-#[allow(dead_code)] // callers arrive with the enrichment worker / api tasks
 pub(crate) fn content_of(body: &str) -> anyhow::Result<String> {
     let v: serde_json::Value = serde_json::from_str(body)?;
     let choice = &v["choices"][0];
@@ -351,7 +342,6 @@ pub(crate) fn content_of(body: &str) -> anyhow::Result<String> {
 
 /// Models love wrapping JSON in ```fences``` or prose despite instructions —
 /// cut the answer down to its outermost object before parsing.
-#[allow(dead_code)] // callers arrive with the enrichment worker / api tasks
 pub(crate) fn extract_json(content: &str) -> &str {
     let content = match content.rfind("</think>") {
         Some(i) => &content[i + "</think>".len()..],
@@ -468,7 +458,6 @@ impl LlmExtract for OpenAiExtractor {
 
 // ---- endpoint discovery & probing (settings UI helpers) ----
 
-#[allow(dead_code)] // callers arrive with the enrichment worker / api tasks
 fn probe_client(timeout_secs: u64) -> reqwest::Client {
     reqwest::Client::builder()
         .timeout(Duration::from_secs(timeout_secs))
@@ -478,7 +467,6 @@ fn probe_client(timeout_secs: u64) -> reqwest::Client {
 }
 
 /// `GET {base_url}/models` — the standard OpenAI-compatible catalog.
-#[allow(dead_code)] // callers arrive with the enrichment worker / api tasks
 pub async fn list_models(base_url: &str, api_key: Option<&str>) -> anyhow::Result<Vec<String>> {
     let url = format!("{}/models", base_url.trim_end_matches('/'));
     let mut request = probe_client(10).get(&url);
@@ -504,7 +492,6 @@ pub async fn list_models(base_url: &str, api_key: Option<&str>) -> anyhow::Resul
 
 /// One tiny real completion against the endpoint — the settings panel's
 /// "Test" button. Errors carry the backend's message verbatim.
-#[allow(dead_code)] // callers arrive with the enrichment worker / api tasks
 pub async fn probe(base_url: &str, model: &str, api_key: Option<&str>) -> anyhow::Result<()> {
     let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
     let body = serde_json::json!({

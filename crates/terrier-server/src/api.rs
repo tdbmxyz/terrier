@@ -25,6 +25,10 @@ pub fn router(state: AppState) -> Router {
         .route("/api/listings", get(list_listings))
         .route("/api/listings/{id}/moderation", axum::routing::put(set_moderation))
         .route("/api/communes", get(commune_stats))
+        .route("/api/settings/llm", get(get_llm_settings).put(put_llm_settings))
+        .route("/api/settings/prompts", get(get_prompts).put(put_prompts))
+        .route("/api/llm/models", get(llm_models))
+        .route("/api/llm/probe", axum::routing::post(llm_probe))
         .with_state(state)
 }
 
@@ -173,12 +177,24 @@ async fn list_listings(
     let listings = state.db.list_listings(q.search_id, q.hidden).await?;
     let ids: Vec<Uuid> = listings.iter().map(|l| l.id).collect();
     let mut histories = state.db.prices_for(&ids).await?;
+    let mut images = state.db.images_for(&ids).await?;
     let out: Vec<ListingWithHistory> = listings
         .into_iter()
         .map(|listing| ListingWithHistory {
             history: histories.remove(&listing.id).unwrap_or_default(),
+            images: images
+                .remove(&listing.id)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|i| terrier_domain::ListingImage {
+                    position: i.position,
+                    url: match i.local_path {
+                        Some(p) => format!("/images/{p}"),
+                        None => i.url,
+                    },
+                })
+                .collect(),
             listing,
-            images: vec![],
         })
         .collect();
     Ok(Json(out).into_response())
@@ -200,6 +216,83 @@ async fn set_moderation(
 
 async fn commune_stats(State(state): State<AppState>) -> Result<Response, ApiError> {
     Ok(Json(state.db.commune_stats().await?).into_response())
+}
+
+async fn get_llm_settings(State(state): State<AppState>) -> Response {
+    Json(state.llm.read().await.settings.clone()).into_response()
+}
+
+async fn put_llm_settings(
+    State(state): State<AppState>,
+    Json(mut update): Json<terrier_domain::LlmSettingsUpdate>,
+) -> Result<Response, ApiError> {
+    // api_key None = keep the previously stored key
+    if update.api_key.is_none()
+        && let Some(prev) = crate::llm::load_override(&state.db).await
+    {
+        update.api_key = prev.api_key;
+    }
+    state
+        .db
+        .put_setting(
+            crate::llm::LLM_SETTINGS_KEY,
+            &serde_json::to_string(&update).expect("settings serialize"),
+        )
+        .await?;
+    let eff = crate::llm::effective(&state.llm_base, Some(&update))
+        .map_err(|e| ApiError(DbError::Corrupt(e.to_string())))?;
+    let prompts = state.llm.read().await.prompts.clone();
+    let runtime = crate::llm::build_runtime(eff, prompts, Some(state.db.clone()));
+    let settings = runtime.settings.clone();
+    *state.llm.write().await = runtime;
+    Ok(Json(settings).into_response())
+}
+
+async fn get_prompts(State(state): State<AppState>) -> Response {
+    Json(state.llm.read().await.prompts.clone()).into_response()
+}
+
+async fn put_prompts(
+    State(state): State<AppState>,
+    Json(prompts): Json<terrier_domain::LlmPrompts>,
+) -> Result<Response, ApiError> {
+    state
+        .db
+        .put_setting(
+            crate::llm::PROMPTS_SETTINGS_KEY,
+            &serde_json::to_string(&prompts).expect("prompts serialize"),
+        )
+        .await?;
+    let merged = crate::llm::effective_prompts(Some(&prompts));
+    let override_ = crate::llm::load_override(&state.db).await;
+    let eff = crate::llm::effective(&state.llm_base, override_.as_ref())
+        .map_err(|e| ApiError(DbError::Corrupt(e.to_string())))?;
+    let runtime = crate::llm::build_runtime(eff, merged.clone(), Some(state.db.clone()));
+    *state.llm.write().await = runtime;
+    Ok(Json(merged).into_response())
+}
+
+#[derive(Deserialize)]
+struct LlmProbeRequest {
+    base_url: String,
+    #[serde(default)]
+    model: String,
+    #[serde(default)]
+    api_key: Option<String>,
+}
+
+async fn llm_models(Query(q): Query<LlmProbeRequest>) -> Response {
+    match crate::llm::list_models(&q.base_url, q.api_key.as_deref()).await {
+        Ok(models) => Json(models).into_response(),
+        Err(e) => (StatusCode::BAD_GATEWAY, e.to_string()).into_response(),
+    }
+}
+
+async fn llm_probe(Json(q): Json<LlmProbeRequest>) -> Response {
+    match crate::llm::probe(&q.base_url, &q.model, q.api_key.as_deref()).await {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(e) => (StatusCode::BAD_GATEWAY, e.to_string()).into_response(),
+    }
 }
 
 #[cfg(test)]
@@ -297,5 +390,62 @@ mod tests {
         assert_eq!(listings.len(), 1);
         assert_eq!(listings[0].history.len(), 1, "history rides along");
         assert_eq!(listings[0].history[0].price_cents, 30_000_000);
+    }
+
+    #[tokio::test]
+    async fn listings_carry_images_with_local_urls() {
+        let db = Db::connect(FsPath::new(":memory:")).await.unwrap();
+        let l = crate::db::tests_listing_helper("https://x/1", 30_000_000);
+        let (stored, _) = db.upsert_listing(&l).await.unwrap();
+        db.add_image_urls(stored.id, &["https://cdn/a.jpg".into(), "https://cdn/b.jpg".into()])
+            .await
+            .unwrap();
+        db.mark_image_saved(stored.id, 0, &format!("{}/0.jpg", stored.id)).await.unwrap();
+        let app = router(AppState {
+            db,
+            notifier: Arc::new(crate::notify::NoopNotifier),
+            statuses: Arc::new(tokio::sync::RwLock::new(Default::default())),
+            shared_locations: Arc::new(tokio::sync::RwLock::new(Vec::new())),
+            location_cap: 20,
+            llm: Default::default(),
+            llm_base: Default::default(),
+        });
+        let resp = app
+            .oneshot(Request::get("/api/listings").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        let listings: Vec<ListingWithHistory> = body_json(resp).await;
+        assert_eq!(listings[0].images.len(), 2);
+        assert_eq!(listings[0].images[0].url, format!("/images/{}/0.jpg", stored.id));
+        assert_eq!(listings[0].images[1].url, "https://cdn/b.jpg", "not yet local: CDN url");
+    }
+
+    #[tokio::test]
+    async fn llm_settings_roundtrip() {
+        let app = app().await;
+        let resp = app
+            .clone()
+            .oneshot(Request::get("/api/settings/llm").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        let s: terrier_domain::LlmSettings = body_json(resp).await;
+        assert!(!s.enabled);
+
+        let resp = app
+            .clone()
+            .oneshot(
+                Request::put("/api/settings/llm")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"enabled": true, "base_url": "http://zeus:8080/v1",
+                            "model": "qwen3", "api_key": null}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let s: terrier_domain::LlmSettings = body_json(resp).await;
+        assert!(s.enabled && s.from_override);
+        assert_eq!(s.model, "qwen3");
     }
 }

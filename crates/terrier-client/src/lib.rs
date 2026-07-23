@@ -4,8 +4,8 @@ use std::time::Duration;
 
 use serde::Serialize;
 use terrier_domain::{
-    CommuneStat, HealthResponse, ListingWithHistory, Moderation, Search, SearchRequest,
-    StatusResponse,
+    CommuneStat, HealthResponse, ListingWithHistory, LlmPrompts, LlmSettings, LlmSettingsUpdate,
+    Moderation, Search, SearchRequest, StatusResponse,
 };
 use url::Url;
 use uuid::Uuid;
@@ -147,5 +147,63 @@ impl TerrierClient {
 
     pub async fn communes(&self) -> Result<Vec<CommuneStat>> {
         self.send(self.http.get(self.url("api/communes")?), DATA_TIMEOUT).await
+    }
+
+    pub async fn llm_settings(&self) -> Result<LlmSettings> {
+        self.send(self.http.get(self.url("api/settings/llm")?), DATA_TIMEOUT).await
+    }
+
+    pub async fn update_llm_settings(&self, update: &LlmSettingsUpdate) -> Result<LlmSettings> {
+        self.send(self.http.put(self.url("api/settings/llm")?).json(update), DATA_TIMEOUT)
+            .await
+    }
+
+    pub async fn llm_prompts(&self) -> Result<LlmPrompts> {
+        self.send(self.http.get(self.url("api/settings/prompts")?), DATA_TIMEOUT).await
+    }
+
+    pub async fn update_llm_prompts(&self, prompts: &LlmPrompts) -> Result<LlmPrompts> {
+        self.send(self.http.put(self.url("api/settings/prompts")?).json(prompts), DATA_TIMEOUT)
+            .await
+    }
+
+    pub async fn llm_models(&self, base_url: &str) -> Result<Vec<String>> {
+        let path = format!(
+            "api/llm/models?base_url={}",
+            url::form_urlencoded::byte_serialize(base_url.as_bytes()).collect::<String>()
+        );
+        self.send(self.http.get(self.url(&path)?), DATA_TIMEOUT).await
+    }
+
+    /// The settings panel's "Test": one tiny completion (slow local models).
+    pub async fn llm_probe(&self, update: &LlmSettingsUpdate) -> Result<()> {
+        #[derive(Serialize)]
+        struct Body<'a> {
+            base_url: &'a str,
+            model: &'a str,
+            api_key: &'a Option<String>,
+        }
+        let mut request = self
+            .http
+            .post(self.url("api/llm/probe")?)
+            .json(&Body {
+                base_url: &update.base_url,
+                model: &update.model,
+                api_key: &update.api_key,
+            })
+            .build()
+            .map_err(|e| ClientError::Transport(e.to_string()))?;
+        *request.timeout_mut() = Some(Duration::from_secs(120));
+        let response = self
+            .http
+            .execute(request)
+            .await
+            .map_err(|e| ClientError::Transport(e.to_string()))?;
+        let status = response.status();
+        if !status.is_success() {
+            let message = response.text().await.unwrap_or_default();
+            return Err(ClientError::Api { status: status.as_u16(), message });
+        }
+        Ok(())
     }
 }

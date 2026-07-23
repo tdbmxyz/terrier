@@ -94,11 +94,8 @@ fn seller_cols(s: &Option<terrier_domain::Seller>) -> (Option<&str>, Option<&str
 /// One listing_images row as the API needs it.
 #[derive(Debug, Clone)]
 pub struct DbImage {
-    #[allow(dead_code)] // callers arrive with the api task
     pub position: i64,
-    #[allow(dead_code)] // callers arrive with the api task
     pub url: String,
-    #[allow(dead_code)] // callers arrive with the api task
     pub local_path: Option<String>,
 }
 
@@ -568,7 +565,6 @@ impl Db {
 
     // ---- settings ----
 
-    #[allow(dead_code)] // settings plumbing shipped for future runtime knobs
     pub async fn get_setting(&self, key: &str) -> Result<Option<String>> {
         let row = sqlx::query("SELECT value FROM settings WHERE key = ?")
             .bind(key)
@@ -577,7 +573,6 @@ impl Db {
         Ok(row.map(|r| r.get("value")))
     }
 
-    #[allow(dead_code)]
     pub async fn put_setting(&self, key: &str, value: &str) -> Result<()> {
         sqlx::query(
             "INSERT INTO settings (key, value) VALUES (?, ?)
@@ -789,7 +784,6 @@ impl Db {
     }
 
     /// All images for many listings at once (the API's inline image lists).
-    #[allow(dead_code)] // callers arrive with the api task
     pub async fn images_for(&self, ids: &[Uuid]) -> Result<HashMap<Uuid, Vec<DbImage>>> {
         let mut map: HashMap<Uuid, Vec<DbImage>> = HashMap::new();
         for chunk in ids.chunks(500) {
@@ -828,7 +822,6 @@ impl Db {
         Ok(())
     }
 
-    #[allow(dead_code)] // callers arrive with the llm task
     pub async fn log_llm_request(&self, e: &crate::llm::LlmLogEntry) -> Result<()> {
         sqlx::query(
             "INSERT INTO llm_requests (kind, model, duration_ms, ok, error,
