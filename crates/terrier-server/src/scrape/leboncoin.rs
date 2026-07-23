@@ -86,10 +86,9 @@ fn seller(ad: &serde_json::Value) -> Option<Seller> {
     })
 }
 
-/// Missing `ads` = no results; missing `__NEXT_DATA__` = blocked or
-/// restructured page → hard error so backoff/alerting kicks in instead of
-/// silently marking everything gone.
-pub fn parse_search_page(html: &str) -> anyhow::Result<Vec<RawListing>> {
+/// The parsed `__NEXT_DATA__` JSON of any Leboncoin page. Missing tag =
+/// blocked page or new layout → hard error so backoff/alerting kicks in.
+fn next_data(html: &str) -> anyhow::Result<serde_json::Value> {
     let start_tag = r#"<script id="__NEXT_DATA__""#;
     let start = html
         .find(start_tag)
@@ -102,7 +101,14 @@ pub fn parse_search_page(html: &str) -> anyhow::Result<Vec<RawListing>> {
         .find("</script>")
         .map(|i| json_start + i)
         .ok_or_else(|| anyhow::anyhow!("unterminated __NEXT_DATA__ tag"))?;
-    let data: serde_json::Value = serde_json::from_str(&html[json_start..json_end])?;
+    Ok(serde_json::from_str(&html[json_start..json_end])?)
+}
+
+/// Missing `ads` = no results; missing `__NEXT_DATA__` = blocked or
+/// restructured page → hard error so backoff/alerting kicks in instead of
+/// silently marking everything gone.
+pub fn parse_search_page(html: &str) -> anyhow::Result<Vec<RawListing>> {
+    let data = next_data(html)?;
 
     let ads = match data["props"]["pageProps"]["searchData"].get("ads") {
         Some(serde_json::Value::Array(ads)) => ads.as_slice(),
@@ -152,6 +158,22 @@ pub fn parse_search_page(html: &str) -> anyhow::Result<Vec<RawListing>> {
         });
     }
     Ok(listings)
+}
+
+/// The ad detail page: full body, complete image set, seller, street.
+pub fn parse_ad_page(html: &str) -> anyhow::Result<terrier_domain::ListingDetail> {
+    let data = next_data(html)?;
+    let ad = &data["props"]["pageProps"]["ad"];
+    anyhow::ensure!(ad.is_object(), "no props.pageProps.ad (blocked page or new layout)");
+    Ok(terrier_domain::ListingDetail {
+        description: ad["body"].as_str().map(str::to_string),
+        address: ad["location"]["street"]
+            .as_str()
+            .or_else(|| ad["location"]["address"].as_str())
+            .map(str::to_string),
+        image_urls: image_urls(ad),
+        seller: seller(ad),
+    })
 }
 
 pub struct LeboncoinSource {
@@ -241,6 +263,14 @@ impl ImmoSource for LeboncoinSource {
         }
         Ok(all)
     }
+
+    async fn fetch_detail(
+        &self,
+        url: &str,
+    ) -> anyhow::Result<Option<terrier_domain::ListingDetail>> {
+        let html = self.fetch_page(url).await?;
+        Ok(Some(parse_ad_page(&html)?))
+    }
 }
 
 #[cfg(test)]
@@ -302,5 +332,29 @@ mod tests {
     #[test]
     fn blocked_page_is_a_hard_error() {
         assert!(parse_search_page("<html>datadome says no</html>").is_err());
+    }
+
+    #[test]
+    fn parses_ad_detail_page() {
+        let html = include_str!("../../tests/fixtures/leboncoin_immo_ad.html");
+        let d = parse_ad_page(html).unwrap();
+        assert!(d.description.as_deref().unwrap().contains("Copropriété de 24 lots"));
+        assert_eq!(d.image_urls.len(), 3);
+        assert_eq!(d.address.as_deref(), Some("Rue de la Monnaie"));
+        assert_eq!(d.seller.as_ref().unwrap().siren.as_deref(), Some("123456789"));
+    }
+
+    #[test]
+    fn blocked_ad_page_is_a_hard_error() {
+        assert!(parse_ad_page("<html>datadome says no</html>").is_err());
+        // page with __NEXT_DATA__ but no ad (layout change) is also an error
+        let html = r#"<script id="__NEXT_DATA__" type="application/json">{"props":{}}</script>"#;
+        assert!(parse_ad_page(html).is_err());
+    }
+
+    #[test]
+    fn image_urls_falls_back_to_plain_urls() {
+        let ad = serde_json::json!({"images": {"urls": ["https://cdn/x.jpg"]}});
+        assert_eq!(image_urls(&ad), vec!["https://cdn/x.jpg".to_string()]);
     }
 }
