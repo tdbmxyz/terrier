@@ -64,6 +64,33 @@ fn moderation_str(m: Moderation) -> &'static str {
     }
 }
 
+fn seller_of(row: &sqlx::sqlite::SqliteRow) -> Option<terrier_domain::Seller> {
+    let kind = match row.get::<Option<String>, _>("seller_type").as_deref() {
+        Some("pro") => terrier_domain::SellerKind::Pro,
+        Some("private") => terrier_domain::SellerKind::Private,
+        _ => return None,
+    };
+    Some(terrier_domain::Seller {
+        kind,
+        name: row.get("seller_name"),
+        siren: row.get("siren"),
+    })
+}
+
+fn seller_cols(s: &Option<terrier_domain::Seller>) -> (Option<&str>, Option<&str>, Option<&str>) {
+    match s {
+        Some(s) => (
+            s.name.as_deref(),
+            Some(match s.kind {
+                terrier_domain::SellerKind::Pro => "pro",
+                terrier_domain::SellerKind::Private => "private",
+            }),
+            s.siren.as_deref(),
+        ),
+        None => (None, None, None),
+    }
+}
+
 impl Db {
     pub async fn connect(path: &Path) -> Result<Self> {
         let options = SqliteConnectOptions::new()
@@ -171,10 +198,11 @@ impl Db {
                 sqlx::query(
                     "INSERT INTO listings (id, source_id, canonical_url, title, price_cents,
                      property_type, surface_m2, rooms, bedrooms, land_m2, commune, postal_code,
-                     lat, lng, dpe, ges, sell_type, flags, status, moderation, first_seen,
+                     lat, lng, dpe, ges, sell_type, description, address, seller_name,
+                     seller_type, siren, flags, status, moderation, first_seen,
                      last_seen)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active',
-                             'none', ?, ?)",
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                             'active', 'none', ?, ?)",
                 )
                 .bind(listing.id.to_string())
                 .bind(&listing.source_id)
@@ -193,6 +221,11 @@ impl Db {
                 .bind(&listing.dpe)
                 .bind(&listing.ges)
                 .bind(&listing.sell_type)
+                .bind(&listing.description)
+                .bind(&listing.address)
+                .bind(seller_cols(&listing.seller).0)
+                .bind(seller_cols(&listing.seller).1)
+                .bind(seller_cols(&listing.seller).2)
                 .bind(serde_json::to_string(&listing.flags).expect("flags serialize"))
                 .bind(listing.first_seen.to_rfc3339())
                 .bind(listing.last_seen.to_rfc3339())
@@ -208,6 +241,11 @@ impl Db {
                     "UPDATE listings SET title = ?, price_cents = ?, property_type = ?,
                      surface_m2 = ?, rooms = ?, bedrooms = ?, land_m2 = ?, commune = ?,
                      postal_code = ?, lat = ?, lng = ?, dpe = ?, ges = ?, sell_type = ?,
+                     description = COALESCE(description, ?),
+                     address = COALESCE(address, ?),
+                     seller_name = COALESCE(?, seller_name),
+                     seller_type = COALESCE(?, seller_type),
+                     siren = COALESCE(?, siren),
                      flags = ?, status = 'active',
                      moderation = CASE
                          WHEN status = 'gone' AND moderation = 'dismissed' THEN 'none'
@@ -228,6 +266,11 @@ impl Db {
                 .bind(&listing.dpe)
                 .bind(&listing.ges)
                 .bind(&listing.sell_type)
+                .bind(&listing.description)
+                .bind(&listing.address)
+                .bind(seller_cols(&listing.seller).0)
+                .bind(seller_cols(&listing.seller).1)
+                .bind(seller_cols(&listing.seller).2)
                 .bind(serde_json::to_string(&listing.flags).expect("flags serialize"))
                 .bind(listing.last_seen.to_rfc3339())
                 .bind(stored.id.to_string())
@@ -247,6 +290,10 @@ impl Db {
                         (ListingStatus::Gone, Moderation::Dismissed) => Moderation::None,
                         _ => stored.moderation,
                     },
+                    description: stored.description.clone().or(listing.description.clone()),
+                    address: stored.address.clone().or(listing.address.clone()),
+                    seller: listing.seller.clone().or(stored.seller.clone()),
+                    attributes: stored.attributes.clone(),
                     ..listing.clone()
                 };
                 Ok((merged, outcome))
@@ -521,6 +568,21 @@ impl Db {
         .await?;
         Ok(())
     }
+
+    // in impl Db (real merge logic lands with the enrichment-queue task)
+    #[allow(dead_code)] // wired up by the enrichment-queue task
+    pub async fn set_detail(&self, id: Uuid, d: &terrier_domain::ListingDetail) -> Result<bool> {
+        let changed = d.description.is_some();
+        if let Some(desc) = &d.description {
+            sqlx::query("UPDATE listings SET description = ?, enriched_at = ? WHERE id = ?")
+                .bind(desc)
+                .bind(Utc::now().to_rfc3339())
+                .bind(id.to_string())
+                .execute(&self.pool)
+                .await?;
+        }
+        Ok(changed)
+    }
 }
 
 /// Canned listing for tests in other modules.
@@ -612,10 +674,11 @@ fn row_to_listing(row: &sqlx::sqlite::SqliteRow) -> Result<Listing> {
         dpe: row.get("dpe"),
         ges: row.get("ges"),
         sell_type: row.get("sell_type"),
-        description: None,
-        address: None,
-        seller: None,
-        attributes: Default::default(),
+        description: row.get("description"),
+        address: row.get("address"),
+        seller: seller_of(row),
+        attributes: serde_json::from_str(&row.get::<String, _>("attributes"))
+            .map_err(|e| DbError::Corrupt(format!("bad attributes: {e}")))?,
         flags,
         status,
         moderation,
@@ -739,5 +802,35 @@ mod tests {
         // €/m²: 2727, 3500, 4000 → median 3500 €/m² = 350_000 cents... in
         // cents/m²: 272_727, 350_000, 400_000 → median 350_000
         assert_eq!(stats[0].median_m2_cents, Some(350_000));
+    }
+
+    #[tokio::test]
+    async fn upsert_keeps_enriched_description_and_updates_seller() {
+        let db = test_db().await;
+        let mut l = listing("https://x/1", 30_000_000);
+        l.description = Some("truncated body".into());
+        l.seller = Some(terrier_domain::Seller {
+            kind: terrier_domain::SellerKind::Pro,
+            name: Some("Agence X".into()),
+            siren: Some("123456789".into()),
+        });
+        let (stored, _) = db.upsert_listing(&l).await.unwrap();
+        assert_eq!(stored.description.as_deref(), Some("truncated body"));
+
+        // enrichment stores the full description…
+        db.set_detail(
+            stored.id,
+            &terrier_domain::ListingDetail {
+                description: Some("the full, longer description".into()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+        // …and a later re-scrape with the truncated body must NOT clobber it
+        let (again, _) = db.upsert_listing(&l).await.unwrap();
+        assert_eq!(again.description.as_deref(), Some("the full, longer description"));
+        assert_eq!(again.seller.as_ref().unwrap().name.as_deref(), Some("Agence X"));
     }
 }
