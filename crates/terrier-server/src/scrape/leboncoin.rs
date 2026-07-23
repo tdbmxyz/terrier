@@ -5,7 +5,7 @@
 //! falls back to a curl subprocess with the same headers (proven in
 //! ferret against the same host).
 
-use terrier_domain::{PropertyType, RawListing};
+use terrier_domain::{PropertyType, RawListing, Seller, SellerKind};
 use url::Url;
 
 use crate::config::LeboncoinConfig;
@@ -63,6 +63,27 @@ fn property_type(ad: &serde_json::Value) -> PropertyType {
         Some("3") => PropertyType::Land,
         _ => PropertyType::Other,
     }
+}
+
+fn image_urls(ad: &serde_json::Value) -> Vec<String> {
+    ad["images"]["urls_large"]
+        .as_array()
+        .or_else(|| ad["images"]["urls"].as_array())
+        .map(|a| a.iter().filter_map(|u| u.as_str().map(str::to_string)).collect())
+        .unwrap_or_default()
+}
+
+fn seller(ad: &serde_json::Value) -> Option<Seller> {
+    let kind = match ad["owner"]["type"].as_str() {
+        Some("pro") => SellerKind::Pro,
+        Some("private") => SellerKind::Private,
+        _ => return None,
+    };
+    Some(Seller {
+        kind,
+        name: ad["owner"]["name"].as_str().map(str::to_string),
+        siren: ad["owner"]["siren"].as_str().or_else(|| attr(ad, "siren")).map(str::to_string),
+    })
 }
 
 /// Missing `ads` = no results; missing `__NEXT_DATA__` = blocked or
@@ -124,10 +145,10 @@ pub fn parse_search_page(html: &str) -> anyhow::Result<Vec<RawListing>> {
                 .filter(|v| ["a", "b", "c", "d", "e", "f", "g"].contains(&v.to_lowercase().as_str()))
                 .map(|v| v.to_lowercase()),
             sell_type: attr(ad, "immo_sell_type").map(str::to_string),
-            description: None,
+            description: ad["body"].as_str().map(str::to_string),
             address: None,
-            image_urls: vec![],
-            seller: None,
+            image_urls: image_urls(ad),
+            seller: seller(ad),
         });
     }
     Ok(listings)
@@ -225,6 +246,7 @@ impl ImmoSource for LeboncoinSource {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use terrier_domain::SellerKind;
 
     #[test]
     fn search_url_builds_category_9_with_location() {
@@ -256,11 +278,19 @@ mod tests {
         assert_eq!(flat.postal_code.as_deref(), Some("35000"));
         assert_eq!(flat.dpe.as_deref(), Some("c"));
         assert_eq!(flat.sell_type.as_deref(), Some("old"));
+        assert_eq!(flat.image_urls.len(), 2);
+        assert!(flat.image_urls[0].ends_with("pent-1.jpg"));
+        assert!(flat.description.as_deref().unwrap().starts_with("Penthouse d'exception"));
+        let seller = flat.seller.as_ref().unwrap();
+        assert_eq!(seller.kind, SellerKind::Pro);
+        assert_eq!(seller.name.as_deref(), Some("Agence Horizon"));
+        assert_eq!(seller.siren.as_deref(), Some("123456789"));
 
         let house = &listings[1];
         assert_eq!(house.property_type, PropertyType::House);
         assert_eq!(house.land_m2, Some(600.0));
         assert_eq!(house.dpe.as_deref(), Some("a"));
+        assert_eq!(house.seller.as_ref().unwrap().kind, SellerKind::Private);
     }
 
     #[test]
