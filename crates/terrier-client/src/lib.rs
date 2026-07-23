@@ -201,13 +201,24 @@ impl TerrierClient {
         .await
     }
 
-    pub async fn llm_models(&self, base_url: &str) -> Result<Vec<String>> {
-        let path = format!(
-            "api/llm/models?base_url={}",
-            url::form_urlencoded::byte_serialize(base_url.as_bytes()).collect::<String>()
-        );
-        self.send(self.http.get(self.url(&path)?), DATA_TIMEOUT)
-            .await
+    /// POST so the api_key never lands in query-string logs
+    /// (model is unused server-side, which is fine).
+    pub async fn llm_models(&self, update: &LlmSettingsUpdate) -> Result<Vec<String>> {
+        #[derive(Serialize)]
+        struct Body<'a> {
+            base_url: &'a str,
+            model: &'a str,
+            api_key: &'a Option<String>,
+        }
+        self.send(
+            self.http.post(self.url("api/llm/models")?).json(&Body {
+                base_url: &update.base_url,
+                model: &update.model,
+                api_key: &update.api_key,
+            }),
+            DATA_TIMEOUT,
+        )
+        .await
     }
 
     /// The settings panel's "Test": one tiny completion (slow local models).

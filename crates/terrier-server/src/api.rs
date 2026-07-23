@@ -33,7 +33,7 @@ pub fn router(state: AppState) -> Router {
             get(get_llm_settings).put(put_llm_settings),
         )
         .route("/api/settings/prompts", get(get_prompts).put(put_prompts))
-        .route("/api/llm/models", get(llm_models))
+        .route("/api/llm/models", axum::routing::post(llm_models))
         .route("/api/llm/probe", axum::routing::post(llm_probe))
         .with_state(state)
 }
@@ -287,7 +287,8 @@ struct LlmProbeRequest {
     api_key: Option<String>,
 }
 
-async fn llm_models(Query(q): Query<LlmProbeRequest>) -> Response {
+// POST so the api_key travels in the body, never in query-string logs.
+async fn llm_models(Json(q): Json<LlmProbeRequest>) -> Response {
     match crate::llm::list_models(&q.base_url, q.api_key.as_deref()).await {
         Ok(models) => Json(models).into_response(),
         Err(e) => (StatusCode::BAD_GATEWAY, e.to_string()).into_response(),

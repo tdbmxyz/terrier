@@ -47,9 +47,9 @@ pub fn SettingsView() -> impl IntoView {
         let client = client.clone();
         move |_| {
             let client = client.clone();
-            let url = base_url.get_untracked();
+            let u = update();
             spawn_local(async move {
-                match client.llm_models(&url).await {
+                match client.llm_models(&u).await {
                     Ok(m) => {
                         feedback.set(format!("{} modèle(s)", m.len()));
                         models.set(m);

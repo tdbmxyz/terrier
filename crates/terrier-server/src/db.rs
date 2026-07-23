@@ -799,6 +799,19 @@ impl Db {
             .collect())
     }
 
+    /// How many images are already on disk for a listing — the per-listing
+    /// cap counts these, not just the current run's downloads.
+    pub async fn saved_image_count(&self, id: Uuid) -> Result<i64> {
+        let row = sqlx::query(
+            "SELECT COUNT(*) AS n FROM listing_images
+             WHERE listing_id = ? AND local_path IS NOT NULL",
+        )
+        .bind(id.to_string())
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(row.get("n"))
+    }
+
     pub async fn mark_image_saved(&self, id: Uuid, position: i64, local_path: &str) -> Result<()> {
         sqlx::query(
             "UPDATE listing_images SET local_path = ?, fetched_at = ?

@@ -28,8 +28,9 @@ as scraping. Steps are independent and each fails open:
    description if the detail fetch failed; re-runs when the stored
    description changes)
 
-Failures retry with the existing 60s→1h backoff curve, capped attempts,
-`last_error` kept. The LLM and the detail fetch are refinement layers,
+Failures retry with a 60s→6h exponential backoff per queue item; at the
+attempt cap the item is dropped (a later price change re-enqueues it
+with a fresh budget). The LLM and the detail fetch are refinement layers,
 never dependencies — scraping and matching keep working without them.
 
 ## Schema (edits to 0001_init.sql)
@@ -83,7 +84,8 @@ never dependencies — scraping and matching keep working without them.
 - Pipeline enqueues on `UpsertOutcome::New` and on any price change.
 - One worker task per source, sharing that source's politeness layer so
   scrape + enrichment stay under the per-host budget together.
-- Image downloads go through the same polite client; images are fetched
+- Image downloads use a separate browser-UA client against the CDN host
+  (distinct from the scrape host) with a fixed 500 ms spacing; images are fetched
   once (a row with `local_path` set is never re-fetched); count capped
   per listing (config, default 10).
 - Queue depth and LLM busy state surface in the status strip.
