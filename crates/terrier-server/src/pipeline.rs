@@ -7,7 +7,8 @@ use std::collections::HashSet;
 
 use chrono::Utc;
 use terrier_domain::{
-    Flag, Listing, ListingStatus, Moderation, RawListing, Search, normalize, search_matches,
+    ExtractedAttrs, Flag, Listing, ListingStatus, Moderation, RawListing, Search, normalize,
+    search_matches,
 };
 use uuid::Uuid;
 
@@ -51,6 +52,10 @@ fn to_listing(raw: RawListing) -> Option<Listing> {
         dpe: raw.dpe,
         ges: raw.ges,
         sell_type: raw.sell_type,
+        description: raw.description,
+        address: raw.address,
+        seller: raw.seller,
+        attributes: ExtractedAttrs::default(),
         flags,
         status: ListingStatus::Active,
         moderation: Moderation::None,
@@ -202,6 +207,10 @@ mod tests {
             dpe: Some("c".into()),
             ges: None,
             sell_type: Some("old".into()),
+            description: None,
+            address: None,
+            image_urls: vec![],
+            seller: None,
         }
     }
 

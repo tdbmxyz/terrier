@@ -48,6 +48,21 @@ pub struct StatusResponse {
     pub sources: Vec<SourceStatus>,
     /// Current match count per search id.
     pub search_matches: HashMap<Uuid, i64>,
+    /// Listings waiting in the enrichment queue.
+    #[serde(default)]
+    pub enrichment_pending: i64,
+    #[serde(default)]
+    pub llm: Option<LlmStatus>,
+}
+
+/// LLM liveness for the status strip.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LlmStatus {
+    pub enabled: bool,
+    pub model: Option<String>,
+    /// In-flight extraction calls right now.
+    pub busy: u32,
 }
 
 /// `GET /api/health` — the connectivity probe, with build identity.

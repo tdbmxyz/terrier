@@ -62,7 +62,13 @@ async fn status(State(state): State<AppState>) -> Result<Response, ApiError> {
     let mut sources: Vec<_> = state.statuses.read().await.values().cloned().collect();
     sources.sort_by(|a, b| a.source_id.cmp(&b.source_id));
     let search_matches = state.db.count_matches().await?;
-    Ok(Json(terrier_domain::StatusResponse { sources, search_matches }).into_response())
+    Ok(Json(terrier_domain::StatusResponse {
+        sources,
+        search_matches,
+        enrichment_pending: 0,
+        llm: None,
+    })
+    .into_response())
 }
 
 async fn list_searches(State(state): State<AppState>) -> Result<Response, ApiError> {
@@ -165,6 +171,7 @@ async fn list_listings(
         .map(|listing| ListingWithHistory {
             history: histories.remove(&listing.id).unwrap_or_default(),
             listing,
+            images: vec![],
         })
         .collect();
     Ok(Json(out).into_response())

@@ -124,6 +124,10 @@ pub fn parse_search_page(html: &str) -> anyhow::Result<Vec<RawListing>> {
                 .filter(|v| ["a", "b", "c", "d", "e", "f", "g"].contains(&v.to_lowercase().as_str()))
                 .map(|v| v.to_lowercase()),
             sell_type: attr(ad, "immo_sell_type").map(str::to_string),
+            description: None,
+            address: None,
+            image_urls: vec![],
+            seller: None,
         });
     }
     Ok(listings)

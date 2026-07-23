@@ -110,6 +110,7 @@ pub fn search_matches(search: &Search, listing: &Listing) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::listing::ExtractedAttrs;
 
     fn listing() -> Listing {
         Listing {
@@ -130,6 +131,10 @@ mod tests {
             dpe: Some("c".into()),
             ges: None,
             sell_type: Some("old".into()),
+            description: None,
+            address: None,
+            seller: None,
+            attributes: ExtractedAttrs::default(),
             flags: vec![],
             status: ListingStatus::Active,
             moderation: Moderation::None,

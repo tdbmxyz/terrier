@@ -117,6 +117,10 @@ fn offer_to_listing(v: &serde_json::Value) -> Option<RawListing> {
         dpe: None,
         ges: None,
         sell_type: None,
+        description: None,
+        address: None,
+        image_urls: vec![],
+        seller: None,
     })
 }
 

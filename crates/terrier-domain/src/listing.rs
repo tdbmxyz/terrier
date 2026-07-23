@@ -67,6 +67,74 @@ pub struct PricePoint {
     pub price_cents: i64,
 }
 
+/// Who is selling: agency/notary (pro) or an individual.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SellerKind {
+    Pro,
+    Private,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Seller {
+    pub kind: SellerKind,
+    #[serde(default)]
+    pub name: Option<String>,
+    /// SIREN of the agency when the source exposes it.
+    #[serde(default)]
+    pub siren: Option<String>,
+}
+
+/// One photo, as the UI should load it: `/images/<id>/<n>.<ext>` once
+/// downloaded locally, the source CDN URL until then.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ListingImage {
+    pub position: i64,
+    pub url: String,
+}
+
+/// Facts extracted from the description by the LLM. Everything optional:
+/// the prompt forbids guessing — absent from the text means null.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ExtractedAttrs {
+    pub annee_construction: Option<i64>,
+    /// "a-prevoir" | "rafraichissement" | "aucun"
+    pub travaux: Option<String>,
+    pub chauffage_type: Option<String>,
+    pub chauffage_energie: Option<String>,
+    pub fibre: Option<bool>,
+    pub charges_copro_month_cents: Option<i64>,
+    pub taxe_fonciere_year_cents: Option<i64>,
+    /// Floor of an apartment; 0 = rez-de-chaussée.
+    pub etage: Option<i64>,
+    pub ascenseur: Option<bool>,
+    pub jardin: Option<bool>,
+    pub garage_parking: Option<bool>,
+    pub piscine: Option<bool>,
+    pub orientation: Option<String>,
+    pub mitoyenne: Option<bool>,
+    /// Notable free-form facts (servitude, locataire en place, viager…).
+    pub notes: Vec<String>,
+}
+
+impl ExtractedAttrs {
+    pub fn is_empty(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
+/// What a detail-page fetch yields — everything optional, merged over the
+/// stored listing (None never clears a stored value).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ListingDetail {
+    pub description: Option<String>,
+    pub address: Option<String>,
+    pub image_urls: Vec<String>,
+    pub seller: Option<Seller>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Listing {
     pub id: Uuid,
@@ -90,6 +158,17 @@ pub struct Listing {
     pub ges: Option<String>,
     /// "old" | "new" | "viager" when the source distinguishes.
     pub sell_type: Option<String>,
+    /// Full description once enriched; the search page's truncated body
+    /// until then.
+    #[serde(default)]
+    pub description: Option<String>,
+    /// Street/quartier when a source gives finer than commune.
+    #[serde(default)]
+    pub address: Option<String>,
+    #[serde(default)]
+    pub seller: Option<Seller>,
+    #[serde(default)]
+    pub attributes: ExtractedAttrs,
     pub flags: Vec<Flag>,
     pub status: ListingStatus,
     pub moderation: Moderation,
@@ -116,6 +195,8 @@ pub struct ListingWithHistory {
     pub listing: Listing,
     #[serde(default)]
     pub history: Vec<PricePoint>,
+    #[serde(default)]
+    pub images: Vec<ListingImage>,
 }
 
 /// What a source plugin hands the pipeline: already-structured where the
@@ -150,20 +231,27 @@ pub struct RawListing {
     pub ges: Option<String>,
     #[serde(default)]
     pub sell_type: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub address: Option<String>,
+    #[serde(default)]
+    pub image_urls: Vec<String>,
+    #[serde(default)]
+    pub seller: Option<Seller>,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn price_per_m2_needs_a_plausible_surface() {
-        let mut l = Listing {
+    fn sample_listing() -> Listing {
+        Listing {
             id: Uuid::nil(),
             source_id: "s".into(),
             canonical_url: "https://x".into(),
             title: "t".into(),
-            price_cents: 30_000_000, // 300 000 €
+            price_cents: 30_000_000,
             property_type: PropertyType::House,
             surface_m2: Some(100.0),
             rooms: None,
@@ -176,16 +264,55 @@ mod tests {
             dpe: None,
             ges: None,
             sell_type: None,
+            description: None,
+            address: None,
+            seller: None,
+            attributes: ExtractedAttrs::default(),
             flags: vec![],
             status: ListingStatus::Active,
             moderation: Moderation::None,
             first_seen: chrono::DateTime::UNIX_EPOCH,
             last_seen: chrono::DateTime::UNIX_EPOCH,
-        };
+        }
+    }
+
+    #[test]
+    fn price_per_m2_needs_a_plausible_surface() {
+        let mut l = sample_listing();
         assert_eq!(l.price_per_m2_cents(), Some(300_000)); // 3 000 €/m²
         l.surface_m2 = Some(0.0);
         assert_eq!(l.price_per_m2_cents(), None, "zero surface = no ratio");
         l.surface_m2 = None;
         assert_eq!(l.price_per_m2_cents(), None);
+    }
+
+    #[test]
+    fn extracted_attrs_defaults_and_is_empty() {
+        let attrs: ExtractedAttrs = serde_json::from_str("{}").unwrap();
+        assert!(attrs.is_empty());
+        let attrs: ExtractedAttrs =
+            serde_json::from_str(r#"{"fibre": true, "notes": ["locataire en place"]}"#).unwrap();
+        assert!(!attrs.is_empty());
+        assert_eq!(attrs.fibre, Some(true));
+        assert_eq!(attrs.notes, vec!["locataire en place"]);
+    }
+
+    #[test]
+    fn old_listing_json_still_deserializes() {
+        // a pre-enrichment Listing serialization must load (serde defaults)
+        let mut v = serde_json::to_value(sample_listing()).unwrap();
+        let obj = v.as_object_mut().unwrap();
+        for key in ["description", "address", "seller", "attributes"] {
+            obj.remove(key);
+        }
+        let l: Listing = serde_json::from_value(v).unwrap();
+        assert!(l.description.is_none() && l.seller.is_none());
+        assert!(l.attributes.is_empty());
+    }
+
+    #[test]
+    fn seller_kind_serializes_kebab_case() {
+        assert_eq!(serde_json::to_string(&SellerKind::Pro).unwrap(), "\"pro\"");
+        assert_eq!(serde_json::to_string(&SellerKind::Private).unwrap(), "\"private\"");
     }
 }
