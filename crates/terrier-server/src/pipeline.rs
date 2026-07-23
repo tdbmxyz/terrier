@@ -105,6 +105,7 @@ pub async fn process_listings(
     let mut seen_urls: HashSet<String> = HashSet::new();
 
     for raw in listings {
+        let image_urls = raw.image_urls.clone();
         let Some(listing) = to_listing(raw) else {
             stats.skipped += 1;
             continue;
@@ -112,9 +113,19 @@ pub async fn process_listings(
         seen_urls.insert(listing.canonical_url.clone());
 
         let (stored, outcome) = db.upsert_listing(&listing).await?;
+        if !image_urls.is_empty() {
+            db.add_image_urls(stored.id, &image_urls).await?;
+        }
         match outcome {
-            UpsertOutcome::New => stats.new_listings += 1,
-            _ => stats.updated_listings += 1,
+            UpsertOutcome::New => {
+                stats.new_listings += 1;
+                db.enqueue_enrichment(stored.id, "new").await?;
+            }
+            UpsertOutcome::PriceChanged { .. } => {
+                stats.updated_listings += 1;
+                db.enqueue_enrichment(stored.id, "price-change").await?;
+            }
+            UpsertOutcome::Unchanged => stats.updated_listings += 1,
         }
 
         if stored.moderation != Moderation::None {
@@ -283,6 +294,27 @@ mod tests {
                 .await;
         assert_eq!(stats.suppressed, 1);
         assert!(notifier.sent.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn new_and_price_change_enqueue_enrichment() {
+        let (db, notifier) = setup().await;
+        let mut r = raw("https://x/1", 32_000_000, "Maison 5 pièces Bruz");
+        r.image_urls = vec!["https://cdn/a.jpg".into()];
+        run(&db, vec![r.clone()], &notifier).await;
+        assert_eq!(db.enrichment_depth().await.unwrap(), 1, "new listing enqueued");
+        // baseline image urls stored from the search page
+        let listings = db.list_listings(None, false).await.unwrap();
+        let images = db.images_for(&[listings[0].id]).await.unwrap();
+        assert_eq!(images[&listings[0].id].len(), 1);
+
+        db.enrichment_done(listings[0].id).await.unwrap();
+        run(&db, vec![r.clone()], &notifier).await;
+        assert_eq!(db.enrichment_depth().await.unwrap(), 0, "unchanged: not re-enqueued");
+
+        r.price_cents = 30_000_000;
+        run(&db, vec![r], &notifier).await;
+        assert_eq!(db.enrichment_depth().await.unwrap(), 1, "price change re-enqueued");
     }
 
     #[tokio::test]

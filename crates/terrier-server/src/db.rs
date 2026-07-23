@@ -593,7 +593,6 @@ impl Db {
 
     // ---- enrichment ----
 
-    #[allow(dead_code)] // callers arrive with the enrichment worker / api tasks
     pub async fn enqueue_enrichment(&self, id: Uuid, reason: &str) -> Result<()> {
         sqlx::query(
             "INSERT INTO enrichment_queue (listing_id, reason, attempts, next_attempt_at)
@@ -743,7 +742,6 @@ impl Db {
 
     /// Append unknown image urls after existing positions (idempotent;
     /// never reorders — UNIQUE(listing_id, url) depends on that).
-    #[allow(dead_code)] // callers arrive with the enrichment worker task
     pub async fn add_image_urls(&self, id: Uuid, urls: &[String]) -> Result<()> {
         let rows = sqlx::query(
             "SELECT url, position FROM listing_images WHERE listing_id = ? ORDER BY position",
