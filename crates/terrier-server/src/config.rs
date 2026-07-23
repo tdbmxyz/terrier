@@ -22,6 +22,8 @@ pub struct Config {
     pub leboncoin: LeboncoinConfig,
     /// Ouest France Immo plugin (needs a stealth fetch_command).
     pub ouestfrance: OuestFranceConfig,
+    pub llm: LlmConfig,
+    pub enrichment: EnrichmentConfig,
 }
 
 impl Default for Config {
@@ -34,6 +36,8 @@ impl Default for Config {
             notifications: NotificationsConfig::default(),
             leboncoin: LeboncoinConfig::default(),
             ouestfrance: OuestFranceConfig::default(),
+            llm: LlmConfig::default(),
+            enrichment: EnrichmentConfig::default(),
         }
     }
 }
@@ -113,6 +117,52 @@ impl Default for OuestFranceConfig {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LlmConfig {
+    pub enabled: bool,
+    /// OpenAI-compatible base url (llama.cpp: http://host:8080/v1).
+    pub base_url: String,
+    pub model: String,
+    pub api_key_file: Option<PathBuf>,
+    pub timeout_secs: u64,
+}
+
+impl Default for LlmConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            base_url: "http://127.0.0.1:8080/v1".into(),
+            model: String::new(),
+            api_key_file: None,
+            timeout_secs: 120,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct EnrichmentConfig {
+    /// Queue poll cadence per source.
+    pub poll_seconds: u64,
+    pub max_attempts: u32,
+    /// Images downloaded per listing at most.
+    pub max_images: usize,
+    /// Where images land; relative paths resolve against the CWD.
+    pub images_dir: PathBuf,
+}
+
+impl Default for EnrichmentConfig {
+    fn default() -> Self {
+        Self {
+            poll_seconds: 60,
+            max_attempts: 8,
+            max_images: 10,
+            images_dir: "images".into(),
+        }
+    }
+}
+
 pub fn load() -> anyhow::Result<Config> {
     let path = std::env::var("TERRIER_CONFIG").unwrap_or_else(|_| "terrier.toml".into());
     let config: Config = Figment::new()
@@ -134,5 +184,6 @@ mod tests {
         assert!(!config.leboncoin.enabled, "sources are opt-in");
         assert!(!config.ouestfrance.enabled);
         assert!(config.notifications.ntfy_url.is_none(), "notifications opt-in");
+        assert!(!config.llm.enabled);
     }
 }
