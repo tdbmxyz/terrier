@@ -1,7 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <!-- terrier: a burrow mound with an entrance -->
-  <rect width="64" height="64" rx="14" fill="#1c1f27"/>
-  <path d="M8 46 Q32 14 56 46 Z" fill="#d98e5f"/>
-  <ellipse cx="32" cy="46" rx="10" ry="7" fill="#14161c"/>
-  <rect x="6" y="45" width="52" height="6" rx="3" fill="#8a6a4f"/>
-</svg>

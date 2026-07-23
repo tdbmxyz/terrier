@@ -6,3 +6,4 @@ terrier.toml
 /result
 /result-*
 *.apk
+crates/terrier-web/dist/
