@@ -104,7 +104,6 @@ pub struct DbImage {
 
 /// What the enrichment worker needs to decide its steps.
 #[derive(Debug, Clone)]
-#[allow(dead_code)] // callers arrive with the enrichment worker task
 pub struct EnrichState {
     pub listing: Listing,
     pub enriched_at: Option<DateTime<Utc>>,
@@ -617,7 +616,6 @@ impl Db {
     }
 
     /// Queue items ready now for one source, oldest first.
-    #[allow(dead_code)] // callers arrive with the enrichment worker task
     pub async fn due_enrichment(&self, source_id: &str, limit: i64) -> Result<Vec<Uuid>> {
         let rows = sqlx::query(
             "SELECT q.listing_id FROM enrichment_queue q
@@ -633,7 +631,6 @@ impl Db {
         rows.iter().map(|r| parse_uuid(&r.get::<String, _>("listing_id"))).collect()
     }
 
-    #[allow(dead_code)] // callers arrive with the enrichment worker task
     pub async fn enrichment_done(&self, id: Uuid) -> Result<()> {
         sqlx::query("DELETE FROM enrichment_queue WHERE listing_id = ?")
             .bind(id.to_string())
@@ -644,7 +641,6 @@ impl Db {
 
     /// Exponential backoff (60s base, 6h cap); deletes at the attempt cap.
     /// Returns true when the item was given up on.
-    #[allow(dead_code)] // callers arrive with the enrichment worker task
     pub async fn enrichment_failed(
         &self,
         id: Uuid,
@@ -683,7 +679,6 @@ impl Db {
         Ok(row.get("n"))
     }
 
-    #[allow(dead_code)] // callers arrive with the enrichment worker task
     pub async fn enrichment_state(&self, id: Uuid) -> Result<EnrichState> {
         let row = sqlx::query("SELECT * FROM listings WHERE id = ?")
             .bind(id.to_string())
@@ -703,7 +698,6 @@ impl Db {
 
     /// Merge a detail fetch over the listing; marks the listing enriched.
     /// Returns true when the description changed (extraction re-triggers).
-    #[allow(dead_code)] // callers arrive with the enrichment worker task
     pub async fn set_detail(&self, id: Uuid, d: &terrier_domain::ListingDetail) -> Result<bool> {
         let stored: Option<String> =
             sqlx::query("SELECT description FROM listings WHERE id = ?")
@@ -769,7 +763,6 @@ impl Db {
         Ok(())
     }
 
-    #[allow(dead_code)] // callers arrive with the enrichment worker task
     pub async fn pending_images(&self, id: Uuid, limit: i64) -> Result<Vec<(i64, String)>> {
         let rows = sqlx::query(
             "SELECT position, url FROM listing_images
@@ -782,7 +775,6 @@ impl Db {
         Ok(rows.iter().map(|r| (r.get("position"), r.get("url"))).collect())
     }
 
-    #[allow(dead_code)] // callers arrive with the enrichment worker task
     pub async fn mark_image_saved(&self, id: Uuid, position: i64, local_path: &str) -> Result<()> {
         sqlx::query(
             "UPDATE listing_images SET local_path = ?, fetched_at = ?
@@ -823,7 +815,6 @@ impl Db {
         Ok(map)
     }
 
-    #[allow(dead_code)] // callers arrive with the llm task
     pub async fn set_attributes(
         &self,
         id: Uuid,

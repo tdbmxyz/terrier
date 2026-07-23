@@ -14,8 +14,6 @@ pub trait ImmoSource: Send + Sync {
 
     /// One listing's detail page; `Ok(None)` when the source has no
     /// detail support (the enricher then marks the listing enriched as-is).
-    // caller arrives with the enrichment worker task
-    #[allow(dead_code)]
     async fn fetch_detail(&self, _url: &str) -> anyhow::Result<Option<ListingDetail>> {
         Ok(None)
     }

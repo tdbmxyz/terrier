@@ -12,7 +12,6 @@ use terrier_domain::{ExtractedAttrs, LlmPrompts, LlmSettings, LlmSettingsUpdate,
 use crate::config::LlmConfig;
 
 /// What the extractor sees about a listing.
-#[allow(dead_code)] // callers arrive with the enrichment worker / api tasks
 pub struct ExtractInput<'a> {
     pub title: &'a str,
     pub price_cents: i64,
@@ -23,7 +22,6 @@ pub struct ExtractInput<'a> {
 }
 
 #[async_trait::async_trait]
-#[allow(dead_code)] // callers arrive with the enrichment worker / api tasks
 pub trait LlmExtract: Send + Sync {
     async fn extract(&self, input: &ExtractInput<'_>) -> anyhow::Result<ExtractedAttrs>;
 }
@@ -115,16 +113,18 @@ pub fn effective(base: &LlmConfig, o: Option<&LlmSettingsUpdate>) -> anyhow::Res
 /// enrichment workers and API handlers pick the new backend up without a
 /// restart.
 #[derive(Clone, Default)]
-#[allow(dead_code)] // callers arrive with the enrichment worker / api tasks
 pub struct LlmRuntime {
     pub extractor: Option<std::sync::Arc<dyn LlmExtract>>,
+    #[allow(dead_code)] // callers arrive with the api task
     pub status: LlmStatus,
+    #[allow(dead_code)] // callers arrive with the api task
     pub settings: LlmSettings,
+    #[allow(dead_code)] // callers arrive with the api task
     pub prompts: LlmPrompts,
+    #[allow(dead_code)] // callers arrive with the api task
     pub busy: std::sync::Arc<std::sync::atomic::AtomicU32>,
 }
 
-#[allow(dead_code)] // callers arrive with the enrichment worker / api tasks
 pub type LlmHandle = std::sync::Arc<tokio::sync::RwLock<LlmRuntime>>;
 
 #[allow(dead_code)] // callers arrive with the enrichment worker / api tasks
