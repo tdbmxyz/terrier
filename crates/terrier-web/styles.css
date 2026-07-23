@@ -309,3 +309,19 @@ table.communes th { color: var(--muted); font-weight: 600; }
 td.ok { color: var(--ok); }
 td.warn { color: var(--warn); }
 td.muted { color: var(--muted); }
+
+/* --- enrichment: thumbnails, gallery, attribute chips, settings --- */
+.deal-row { display: flex; gap: 0.6rem; min-width: 0; }
+.deal-body { flex: 1; min-width: 0; }
+.thumb {
+  width: 74px; height: 74px; object-fit: cover; border-radius: 6px;
+  flex-shrink: 0; cursor: pointer; background: rgba(127, 127, 127, 0.15);
+}
+.badge.seller { opacity: 0.85; }
+.attrs { font-size: 0.85em; }
+button.expand { font-size: 0.8em; padding: 0.15rem 0.5rem; }
+.deal-detail .description { white-space: pre-line; font-size: 0.9em; }
+.gallery { display: flex; gap: 0.4rem; overflow-x: auto; padding-bottom: 0.3rem; }
+.gallery img { height: 110px; border-radius: 6px; flex-shrink: 0; }
+.settings textarea { width: 100%; font-family: monospace; font-size: 0.85em; }
+.settings .row { display: flex; gap: 0.4rem; flex-wrap: wrap; }

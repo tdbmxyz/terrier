@@ -4,6 +4,7 @@ mod about;
 mod communes;
 mod listings;
 mod searches;
+mod settings;
 mod sparkline;
 mod status;
 
@@ -21,6 +22,7 @@ enum Tab {
     Listings,
     Searches,
     Communes,
+    Settings,
     About,
 }
 
@@ -77,6 +79,7 @@ pub fn App(config: AppConfig) -> impl IntoView {
                 {tab_button(Tab::Listings, "Annonces")}
                 {tab_button(Tab::Searches, "Recherches")}
                 {tab_button(Tab::Communes, "Communes")}
+                {tab_button(Tab::Settings, "Réglages")}
                 {tab_button(Tab::About, "À propos")}
             </nav>
             <button class="connect-toggle" title="server address"
@@ -104,6 +107,9 @@ pub fn App(config: AppConfig) -> impl IntoView {
             </div>
             <div style:display=move || if tab.get() == Tab::Communes { "" } else { "none" }>
                 <communes::CommunesView/>
+            </div>
+            <div style:display=move || if tab.get() == Tab::Settings { "" } else { "none" }>
+                <settings::SettingsView/>
             </div>
             <div style:display=move || if tab.get() == Tab::About { "" } else { "none" }>
                 <about::AboutView/>
