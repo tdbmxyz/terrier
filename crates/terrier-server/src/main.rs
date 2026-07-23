@@ -1,6 +1,7 @@
 mod api;
 mod config;
 mod db;
+mod llm;
 mod notify;
 mod pipeline;
 mod politeness;

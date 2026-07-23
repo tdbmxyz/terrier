@@ -91,6 +91,26 @@ fn seller_cols(s: &Option<terrier_domain::Seller>) -> (Option<&str>, Option<&str
     }
 }
 
+/// One listing_images row as the API needs it.
+#[derive(Debug, Clone)]
+pub struct DbImage {
+    #[allow(dead_code)] // callers arrive with the api task
+    pub position: i64,
+    #[allow(dead_code)] // callers arrive with the api task
+    pub url: String,
+    #[allow(dead_code)] // callers arrive with the api task
+    pub local_path: Option<String>,
+}
+
+/// What the enrichment worker needs to decide its steps.
+#[derive(Debug, Clone)]
+#[allow(dead_code)] // callers arrive with the enrichment worker task
+pub struct EnrichState {
+    pub listing: Listing,
+    pub enriched_at: Option<DateTime<Utc>>,
+    pub extracted_at: Option<DateTime<Utc>>,
+}
+
 impl Db {
     pub async fn connect(path: &Path) -> Result<Self> {
         let options = SqliteConnectOptions::new()
@@ -571,18 +591,271 @@ impl Db {
         Ok(())
     }
 
-    #[allow(dead_code)] // wired up by the enrichment-queue task
-    pub async fn set_detail(&self, id: Uuid, d: &terrier_domain::ListingDetail) -> Result<bool> {
-        let changed = d.description.is_some();
-        if let Some(desc) = &d.description {
-            sqlx::query("UPDATE listings SET description = ?, enriched_at = ? WHERE id = ?")
-                .bind(desc)
-                .bind(Utc::now().to_rfc3339())
+    // ---- enrichment ----
+
+    #[allow(dead_code)] // callers arrive with the enrichment worker / api tasks
+    pub async fn enqueue_enrichment(&self, id: Uuid, reason: &str) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO enrichment_queue (listing_id, reason, attempts, next_attempt_at)
+             VALUES (?, ?, 0, ?)
+             ON CONFLICT (listing_id) DO UPDATE SET
+                 reason = excluded.reason, next_attempt_at = excluded.next_attempt_at",
+        )
+        .bind(id.to_string())
+        .bind(reason)
+        .bind(Utc::now().to_rfc3339())
+        .execute(&self.pool)
+        .await?;
+        if reason == "price-change" {
+            // force a detail re-fetch: the description may have changed
+            sqlx::query("UPDATE listings SET enriched_at = NULL WHERE id = ?")
                 .bind(id.to_string())
                 .execute(&self.pool)
                 .await?;
         }
+        Ok(())
+    }
+
+    /// Queue items ready now for one source, oldest first.
+    #[allow(dead_code)] // callers arrive with the enrichment worker task
+    pub async fn due_enrichment(&self, source_id: &str, limit: i64) -> Result<Vec<Uuid>> {
+        let rows = sqlx::query(
+            "SELECT q.listing_id FROM enrichment_queue q
+             JOIN listings l ON l.id = q.listing_id
+             WHERE l.source_id = ? AND q.next_attempt_at <= ?
+             ORDER BY q.next_attempt_at LIMIT ?",
+        )
+        .bind(source_id)
+        .bind(Utc::now().to_rfc3339())
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?;
+        rows.iter().map(|r| parse_uuid(&r.get::<String, _>("listing_id"))).collect()
+    }
+
+    #[allow(dead_code)] // callers arrive with the enrichment worker task
+    pub async fn enrichment_done(&self, id: Uuid) -> Result<()> {
+        sqlx::query("DELETE FROM enrichment_queue WHERE listing_id = ?")
+            .bind(id.to_string())
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// Exponential backoff (60s base, 6h cap); deletes at the attempt cap.
+    /// Returns true when the item was given up on.
+    #[allow(dead_code)] // callers arrive with the enrichment worker task
+    pub async fn enrichment_failed(
+        &self,
+        id: Uuid,
+        error: &str,
+        max_attempts: u32,
+    ) -> Result<bool> {
+        let row = sqlx::query("SELECT attempts FROM enrichment_queue WHERE listing_id = ?")
+            .bind(id.to_string())
+            .fetch_optional(&self.pool)
+            .await?;
+        let Some(row) = row else { return Ok(true) };
+        let attempts: u32 = row.get::<i64, _>("attempts") as u32 + 1;
+        if attempts >= max_attempts {
+            self.enrichment_done(id).await?;
+            return Ok(true);
+        }
+        let backoff = 60u64.saturating_mul(2u64.saturating_pow(attempts - 1)).min(21_600);
+        sqlx::query(
+            "UPDATE enrichment_queue SET attempts = ?, next_attempt_at = ?, last_error = ?
+             WHERE listing_id = ?",
+        )
+        .bind(attempts as i64)
+        .bind((Utc::now() + chrono::Duration::seconds(backoff as i64)).to_rfc3339())
+        .bind(error)
+        .bind(id.to_string())
+        .execute(&self.pool)
+        .await?;
+        Ok(false)
+    }
+
+    #[allow(dead_code)] // callers arrive with the enrichment worker / api tasks
+    pub async fn enrichment_depth(&self) -> Result<i64> {
+        let row = sqlx::query("SELECT COUNT(*) AS n FROM enrichment_queue")
+            .fetch_one(&self.pool)
+            .await?;
+        Ok(row.get("n"))
+    }
+
+    #[allow(dead_code)] // callers arrive with the enrichment worker task
+    pub async fn enrichment_state(&self, id: Uuid) -> Result<EnrichState> {
+        let row = sqlx::query("SELECT * FROM listings WHERE id = ?")
+            .bind(id.to_string())
+            .fetch_optional(&self.pool)
+            .await?
+            .ok_or(DbError::NotFound)?;
+        let enriched_at = row
+            .get::<Option<String>, _>("enriched_at")
+            .map(|s| parse_ts(&s))
+            .transpose()?;
+        let extracted_at = row
+            .get::<Option<String>, _>("extracted_at")
+            .map(|s| parse_ts(&s))
+            .transpose()?;
+        Ok(EnrichState { listing: row_to_listing(&row)?, enriched_at, extracted_at })
+    }
+
+    /// Merge a detail fetch over the listing; marks the listing enriched.
+    /// Returns true when the description changed (extraction re-triggers).
+    #[allow(dead_code)] // callers arrive with the enrichment worker task
+    pub async fn set_detail(&self, id: Uuid, d: &terrier_domain::ListingDetail) -> Result<bool> {
+        let stored: Option<String> =
+            sqlx::query("SELECT description FROM listings WHERE id = ?")
+                .bind(id.to_string())
+                .fetch_optional(&self.pool)
+                .await?
+                .ok_or(DbError::NotFound)?
+                .get("description");
+        let changed = d.description.is_some() && d.description != stored;
+        let (s_name, s_type, s_siren) = seller_cols(&d.seller);
+        sqlx::query(
+            "UPDATE listings SET
+                 description = COALESCE(?, description),
+                 address = COALESCE(?, address),
+                 seller_name = COALESCE(?, seller_name),
+                 seller_type = COALESCE(?, seller_type),
+                 siren = COALESCE(?, siren),
+                 enriched_at = ?,
+                 extracted_at = CASE WHEN ? THEN NULL ELSE extracted_at END
+             WHERE id = ?",
+        )
+        .bind(&d.description)
+        .bind(&d.address)
+        .bind(s_name)
+        .bind(s_type)
+        .bind(s_siren)
+        .bind(Utc::now().to_rfc3339())
+        .bind(changed)
+        .bind(id.to_string())
+        .execute(&self.pool)
+        .await?;
+        if !d.image_urls.is_empty() {
+            self.add_image_urls(id, &d.image_urls).await?;
+        }
         Ok(changed)
+    }
+
+    /// Append unknown image urls after existing positions (idempotent;
+    /// never reorders — UNIQUE(listing_id, url) depends on that).
+    #[allow(dead_code)] // callers arrive with the enrichment worker task
+    pub async fn add_image_urls(&self, id: Uuid, urls: &[String]) -> Result<()> {
+        let rows = sqlx::query(
+            "SELECT url, position FROM listing_images WHERE listing_id = ? ORDER BY position",
+        )
+        .bind(id.to_string())
+        .fetch_all(&self.pool)
+        .await?;
+        let known: HashSet<String> = rows.iter().map(|r| r.get("url")).collect();
+        let mut next = rows.iter().map(|r| r.get::<i64, _>("position")).max().map_or(0, |p| p + 1);
+        for url in urls {
+            if known.contains(url) {
+                continue;
+            }
+            sqlx::query(
+                "INSERT OR IGNORE INTO listing_images (listing_id, position, url) VALUES (?, ?, ?)",
+            )
+            .bind(id.to_string())
+            .bind(next)
+            .bind(url)
+            .execute(&self.pool)
+            .await?;
+            next += 1;
+        }
+        Ok(())
+    }
+
+    #[allow(dead_code)] // callers arrive with the enrichment worker task
+    pub async fn pending_images(&self, id: Uuid, limit: i64) -> Result<Vec<(i64, String)>> {
+        let rows = sqlx::query(
+            "SELECT position, url FROM listing_images
+             WHERE listing_id = ? AND local_path IS NULL ORDER BY position LIMIT ?",
+        )
+        .bind(id.to_string())
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows.iter().map(|r| (r.get("position"), r.get("url"))).collect())
+    }
+
+    #[allow(dead_code)] // callers arrive with the enrichment worker task
+    pub async fn mark_image_saved(&self, id: Uuid, position: i64, local_path: &str) -> Result<()> {
+        sqlx::query(
+            "UPDATE listing_images SET local_path = ?, fetched_at = ?
+             WHERE listing_id = ? AND position = ?",
+        )
+        .bind(local_path)
+        .bind(Utc::now().to_rfc3339())
+        .bind(id.to_string())
+        .bind(position)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// All images for many listings at once (the API's inline image lists).
+    #[allow(dead_code)] // callers arrive with the api task
+    pub async fn images_for(&self, ids: &[Uuid]) -> Result<HashMap<Uuid, Vec<DbImage>>> {
+        let mut map: HashMap<Uuid, Vec<DbImage>> = HashMap::new();
+        for chunk in ids.chunks(500) {
+            let placeholders = vec!["?"; chunk.len()].join(",");
+            let sql = format!(
+                "SELECT listing_id, position, url, local_path FROM listing_images
+                 WHERE listing_id IN ({placeholders}) ORDER BY position"
+            );
+            let mut q = sqlx::query(&sql);
+            for id in chunk {
+                q = q.bind(id.to_string());
+            }
+            for row in q.fetch_all(&self.pool).await? {
+                let id = parse_uuid(&row.get::<String, _>("listing_id"))?;
+                map.entry(id).or_default().push(DbImage {
+                    position: row.get("position"),
+                    url: row.get("url"),
+                    local_path: row.get("local_path"),
+                });
+            }
+        }
+        Ok(map)
+    }
+
+    #[allow(dead_code)] // callers arrive with the llm task
+    pub async fn set_attributes(
+        &self,
+        id: Uuid,
+        attrs: &terrier_domain::ExtractedAttrs,
+    ) -> Result<()> {
+        sqlx::query("UPDATE listings SET attributes = ?, extracted_at = ? WHERE id = ?")
+            .bind(serde_json::to_string(attrs).expect("attrs serialize"))
+            .bind(Utc::now().to_rfc3339())
+            .bind(id.to_string())
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    #[allow(dead_code)] // callers arrive with the llm task
+    pub async fn log_llm_request(&self, e: &crate::llm::LlmLogEntry) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO llm_requests (kind, model, duration_ms, ok, error,
+             prompt_tokens, completion_tokens, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(&e.kind)
+        .bind(&e.model)
+        .bind(e.duration_ms)
+        .bind(e.ok)
+        .bind(&e.error)
+        .bind(e.prompt_tokens)
+        .bind(e.completion_tokens)
+        .bind(Utc::now().to_rfc3339())
+        .execute(&self.pool)
+        .await?;
+        Ok(())
     }
 }
 
@@ -850,5 +1123,83 @@ mod tests {
         assert_eq!(seller.kind, terrier_domain::SellerKind::Private);
         assert_eq!(seller.name.as_deref(), Some("Jean"));
         assert_eq!(seller.siren, None, "stale pro siren must not survive a seller change");
+    }
+
+    #[tokio::test]
+    async fn enrichment_queue_lifecycle() {
+        let db = test_db().await;
+        let (l, _) = db.upsert_listing(&listing("https://x/1", 30_000_000)).await.unwrap();
+        db.enqueue_enrichment(l.id, "new").await.unwrap();
+        assert_eq!(db.enrichment_depth().await.unwrap(), 1);
+        assert_eq!(db.due_enrichment("src", 10).await.unwrap(), vec![l.id]);
+
+        // failure backs off into the future — no longer due
+        let gave_up = db.enrichment_failed(l.id, "boom", 8).await.unwrap();
+        assert!(!gave_up);
+        assert!(db.due_enrichment("src", 10).await.unwrap().is_empty());
+
+        // attempts cap deletes the item
+        for _ in 0..7 {
+            db.enrichment_failed(l.id, "boom", 8).await.unwrap();
+        }
+        assert_eq!(db.enrichment_depth().await.unwrap(), 0);
+
+        // done removes it too
+        db.enqueue_enrichment(l.id, "new").await.unwrap();
+        db.enrichment_done(l.id).await.unwrap();
+        assert_eq!(db.enrichment_depth().await.unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn price_change_enqueue_clears_enriched_at() {
+        let db = test_db().await;
+        let (l, _) = db.upsert_listing(&listing("https://x/1", 30_000_000)).await.unwrap();
+        db.set_detail(l.id, &terrier_domain::ListingDetail::default()).await.unwrap();
+        assert!(db.enrichment_state(l.id).await.unwrap().enriched_at.is_some());
+        db.enqueue_enrichment(l.id, "price-change").await.unwrap();
+        assert!(db.enrichment_state(l.id).await.unwrap().enriched_at.is_none());
+    }
+
+    #[tokio::test]
+    async fn detail_merge_images_and_extraction_state() {
+        let db = test_db().await;
+        let (l, _) = db.upsert_listing(&listing("https://x/1", 30_000_000)).await.unwrap();
+        db.add_image_urls(l.id, &["https://cdn/a.jpg".into(), "https://cdn/b.jpg".into()])
+            .await
+            .unwrap();
+        // idempotent by url, new urls append after existing positions
+        db.add_image_urls(l.id, &["https://cdn/b.jpg".into(), "https://cdn/c.jpg".into()])
+            .await
+            .unwrap();
+        let pending = db.pending_images(l.id, 10).await.unwrap();
+        assert_eq!(
+            pending,
+            vec![
+                (0, "https://cdn/a.jpg".into()),
+                (1, "https://cdn/b.jpg".into()),
+                (2, "https://cdn/c.jpg".into())
+            ]
+        );
+        db.mark_image_saved(l.id, 0, "xx/0.jpg").await.unwrap();
+        assert_eq!(db.pending_images(l.id, 10).await.unwrap().len(), 2);
+        let by_listing = db.images_for(&[l.id]).await.unwrap();
+        assert_eq!(by_listing[&l.id].len(), 3);
+        assert_eq!(by_listing[&l.id][0].local_path.as_deref(), Some("xx/0.jpg"));
+
+        // a changed description resets extraction; same description doesn't
+        let attrs = terrier_domain::ExtractedAttrs { fibre: Some(true), ..Default::default() };
+        db.set_attributes(l.id, &attrs).await.unwrap();
+        assert!(db.enrichment_state(l.id).await.unwrap().extracted_at.is_some());
+        let detail = terrier_domain::ListingDetail {
+            description: Some("desc v1".into()),
+            ..Default::default()
+        };
+        assert!(db.set_detail(l.id, &detail).await.unwrap());
+        let st = db.enrichment_state(l.id).await.unwrap();
+        assert!(st.extracted_at.is_none(), "new description re-triggers extraction");
+        assert_eq!(st.listing.attributes.fibre, Some(true), "old attrs kept meanwhile");
+        db.set_attributes(l.id, &attrs).await.unwrap();
+        assert!(!db.set_detail(l.id, &detail).await.unwrap(), "same description: no change");
+        assert!(db.enrichment_state(l.id).await.unwrap().extracted_at.is_some());
     }
 }
