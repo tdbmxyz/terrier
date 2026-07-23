@@ -598,7 +598,8 @@ impl Db {
             "INSERT INTO enrichment_queue (listing_id, reason, attempts, next_attempt_at)
              VALUES (?, ?, 0, ?)
              ON CONFLICT (listing_id) DO UPDATE SET
-                 reason = excluded.reason, next_attempt_at = excluded.next_attempt_at",
+                 reason = excluded.reason, next_attempt_at = excluded.next_attempt_at,
+                 attempts = 0, last_error = NULL",
         )
         .bind(id.to_string())
         .bind(reason)
@@ -712,6 +713,9 @@ impl Db {
                 .ok_or(DbError::NotFound)?
                 .get("description");
         let changed = d.description.is_some() && d.description != stored;
+        if !d.image_urls.is_empty() {
+            self.add_image_urls(id, &d.image_urls).await?;
+        }
         let (s_name, s_type, s_siren) = seller_cols(&d.seller);
         sqlx::query(
             "UPDATE listings SET
@@ -734,9 +738,6 @@ impl Db {
         .bind(id.to_string())
         .execute(&self.pool)
         .await?;
-        if !d.image_urls.is_empty() {
-            self.add_image_urls(id, &d.image_urls).await?;
-        }
         Ok(changed)
     }
 
@@ -1146,6 +1147,22 @@ mod tests {
         db.enqueue_enrichment(l.id, "new").await.unwrap();
         db.enrichment_done(l.id).await.unwrap();
         assert_eq!(db.enrichment_depth().await.unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn reenqueue_resets_attempt_budget() {
+        let db = test_db().await;
+        let (l, _) = db.upsert_listing(&listing("https://x/1", 30_000_000)).await.unwrap();
+        db.enqueue_enrichment(l.id, "new").await.unwrap();
+        for _ in 0..7 {
+            db.enrichment_failed(l.id, "boom", 8).await.unwrap();
+        }
+        // a fresh trigger gets a fresh budget
+        db.enqueue_enrichment(l.id, "new").await.unwrap();
+        assert!(!db.due_enrichment("src", 10).await.unwrap().is_empty());
+        let gave_up = db.enrichment_failed(l.id, "x", 8).await.unwrap();
+        assert!(!gave_up, "attempts should have restarted from 0");
+        assert_eq!(db.enrichment_depth().await.unwrap(), 1);
     }
 
     #[tokio::test]
