@@ -182,24 +182,44 @@ pub async fn load_prompts(db: &crate::db::Db) -> Option<LlmPrompts> {
 
 // ---- system prompt: default here, user-overridable via settings ----
 
+// Tuned against real Leboncoin descriptions (2026-07): the earlier version
+// routed "fibre optique" into notes instead of the fibre field, missed
+// informally-stated copro charges, and produced noisy notes (DPE values,
+// marketing). The rules below fixed all three on a 10-listing sample.
 pub const EXTRACT_PROMPT: &str = "You extract structured facts from a French real-estate SALE listing for \
      a price tracker. Fill ONLY what the text explicitly states — never \
-     guess, never infer from what is typical; absent from the text means \
-     null (empty list for notes).\n\
-     - annee_construction: the build year when stated.\n\
-     - travaux: \"a-prevoir\" (works needed), \"rafraichissement\" (light \
-       refresh), \"aucun\" ONLY if the text says none are needed / recently \
-       renovated.\n\
-     - chauffage_type (individuel/collectif/pompe à chaleur/poêle…), \
-       chauffage_energie (gaz/electrique/fioul/bois…).\n\
-     - charges_copro_month_eur: MONTHLY copropriété charges in euros \
-       (convert if given per year/quarter). taxe_fonciere_year_eur: YEARLY \
-       property tax in euros.\n\
-     - etage: the apartment's floor (0 = rez-de-chaussée).\n\
-     - orientation: main exposure when stated.\n\
-     - notes: short French phrases for notable facts the other fields don't \
-       cover (servitude, locataire en place, viager occupé, DPE vierge, \
-       zone inondable, travaux de copropriété votés…).\n\
+     guess, never infer from what is typical; absent means null (empty list \
+     for notes).\n\
+     - annee_construction: the build/construction year when stated.\n\
+     - travaux: \"a-prevoir\" (work needed / à rénover / à rafraîchir), \
+       \"rafraichissement\" (light refresh only), \"aucun\" only if the text \
+       says renovated / rénové / refait / neuf / no work needed. Else null.\n\
+     - chauffage_type (individuel / collectif / pompe à chaleur / poêle …), \
+       chauffage_energie (gaz / electrique / fioul / bois / granulés …).\n\
+     - fibre: true when the text says the fibre / fibre optique is INSTALLED \
+       or connected. Leave null if it only says \"éligible fibre\" (not yet \
+       installed) or does not mention it. Do NOT also mention fibre in notes.\n\
+     - charges_copro_month_eur: copropriété charges as a MONTHLY euro number. \
+       Convert if the text gives them per year (÷12) or per quarter (÷3). If \
+       a range is given (\"100-200€/an\"), use the lower bound. Extract even \
+       when phrased informally.\n\
+     - taxe_fonciere_year_eur: property tax as a YEARLY euro number.\n\
+     - etage: apartment floor as an integer (0 = rez-de-chaussée). null for \
+       houses.\n\
+     - ascenseur, jardin, garage_parking (garage OR parking OR box), piscine, \
+       mitoyenne: true only when stated.\n\
+     - orientation: the main exposure as a cardinal direction (sud, nord, \
+       est, ouest, sud-ouest, est/ouest …). Ignore vague words like \
+       \"ensoleillé\" or \"lumineux\".\n\
+     - notes: 0-4 short French phrases for buyer-relevant CONSTRAINTS or \
+       unusual facts the fields above do NOT already cover — e.g. bien vendu \
+       loué / locataire en place, viager occupé, servitude, indivision, \
+       copropriété en procédure, travaux de copro votés, zone inondable, \
+       bail en cours, DPE vierge, obligation de débroussaillement. Do NOT put \
+       in notes: DPE/GES ratings or values, surface or room counts, marketing \
+       praise (\"charme\", \"lumineux\", \"idéalement situé\"), proximity to \
+       shops/schools, or anything already captured by another field. If \
+       nothing qualifies, return [].\n\
      Answer only with the JSON object.";
 
 pub fn default_prompts() -> LlmPrompts {
