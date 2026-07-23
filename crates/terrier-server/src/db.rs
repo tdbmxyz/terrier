@@ -195,13 +195,14 @@ impl Db {
                 .await?;
         match existing {
             None => {
+                let (s_name, s_type, s_siren) = seller_cols(&listing.seller);
                 sqlx::query(
                     "INSERT INTO listings (id, source_id, canonical_url, title, price_cents,
                      property_type, surface_m2, rooms, bedrooms, land_m2, commune, postal_code,
                      lat, lng, dpe, ges, sell_type, description, address, seller_name,
-                     seller_type, siren, flags, status, moderation, first_seen,
+                     seller_type, siren, attributes, flags, status, moderation, first_seen,
                      last_seen)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                              'active', 'none', ?, ?)",
                 )
                 .bind(listing.id.to_string())
@@ -223,9 +224,10 @@ impl Db {
                 .bind(&listing.sell_type)
                 .bind(&listing.description)
                 .bind(&listing.address)
-                .bind(seller_cols(&listing.seller).0)
-                .bind(seller_cols(&listing.seller).1)
-                .bind(seller_cols(&listing.seller).2)
+                .bind(s_name)
+                .bind(s_type)
+                .bind(s_siren)
+                .bind(serde_json::to_string(&listing.attributes).expect("attrs serialize"))
                 .bind(serde_json::to_string(&listing.flags).expect("flags serialize"))
                 .bind(listing.first_seen.to_rfc3339())
                 .bind(listing.last_seen.to_rfc3339())
@@ -237,15 +239,15 @@ impl Db {
             }
             Some(row) => {
                 let stored = row_to_listing(&row)?;
+                let merged_seller = listing.seller.clone().or(stored.seller.clone());
+                let (s_name, s_type, s_siren) = seller_cols(&merged_seller);
                 sqlx::query(
                     "UPDATE listings SET title = ?, price_cents = ?, property_type = ?,
                      surface_m2 = ?, rooms = ?, bedrooms = ?, land_m2 = ?, commune = ?,
                      postal_code = ?, lat = ?, lng = ?, dpe = ?, ges = ?, sell_type = ?,
                      description = COALESCE(description, ?),
                      address = COALESCE(address, ?),
-                     seller_name = COALESCE(?, seller_name),
-                     seller_type = COALESCE(?, seller_type),
-                     siren = COALESCE(?, siren),
+                     seller_name = ?, seller_type = ?, siren = ?,
                      flags = ?, status = 'active',
                      moderation = CASE
                          WHEN status = 'gone' AND moderation = 'dismissed' THEN 'none'
@@ -268,9 +270,9 @@ impl Db {
                 .bind(&listing.sell_type)
                 .bind(&listing.description)
                 .bind(&listing.address)
-                .bind(seller_cols(&listing.seller).0)
-                .bind(seller_cols(&listing.seller).1)
-                .bind(seller_cols(&listing.seller).2)
+                .bind(s_name)
+                .bind(s_type)
+                .bind(s_siren)
                 .bind(serde_json::to_string(&listing.flags).expect("flags serialize"))
                 .bind(listing.last_seen.to_rfc3339())
                 .bind(stored.id.to_string())
@@ -292,7 +294,7 @@ impl Db {
                     },
                     description: stored.description.clone().or(listing.description.clone()),
                     address: stored.address.clone().or(listing.address.clone()),
-                    seller: listing.seller.clone().or(stored.seller.clone()),
+                    seller: merged_seller,
                     attributes: stored.attributes.clone(),
                     ..listing.clone()
                 };
@@ -569,7 +571,6 @@ impl Db {
         Ok(())
     }
 
-    // in impl Db (real merge logic lands with the enrichment-queue task)
     #[allow(dead_code)] // wired up by the enrichment-queue task
     pub async fn set_detail(&self, id: Uuid, d: &terrier_domain::ListingDetail) -> Result<bool> {
         let changed = d.description.is_some();
@@ -832,5 +833,22 @@ mod tests {
         let (again, _) = db.upsert_listing(&l).await.unwrap();
         assert_eq!(again.description.as_deref(), Some("the full, longer description"));
         assert_eq!(again.seller.as_ref().unwrap().name.as_deref(), Some("Agence X"));
+
+        // a later re-scrape with a *different* seller (private, no siren)
+        // must replace the stored seller atomically — not leave a stale
+        // pro siren behind because only the non-null columns were COALESCEd.
+        let mut l2 = l.clone();
+        l2.seller = Some(terrier_domain::Seller {
+            kind: terrier_domain::SellerKind::Private,
+            name: Some("Jean".into()),
+            siren: None,
+        });
+        db.upsert_listing(&l2).await.unwrap();
+        let stored_listings = db.list_listings(None, false).await.unwrap();
+        let stored = stored_listings.iter().find(|x| x.id == again.id).unwrap();
+        let seller = stored.seller.as_ref().expect("seller present");
+        assert_eq!(seller.kind, terrier_domain::SellerKind::Private);
+        assert_eq!(seller.name.as_deref(), Some("Jean"));
+        assert_eq!(seller.siren, None, "stale pro siren must not survive a seller change");
     }
 }
