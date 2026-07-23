@@ -30,6 +30,19 @@ async fn main() -> anyhow::Result<()> {
         .await
         .with_context(|| format!("opening database {}", config.db_path.display()))?;
 
+    let llm_override = llm::load_override(&db).await;
+    let prompts = llm::effective_prompts(llm::load_prompts(&db).await.as_ref());
+    let llm_eff = llm::effective(&config.llm, llm_override.as_ref())
+        .context("resolving llm configuration")?;
+    if llm_eff.enabled {
+        tracing::info!(model = %llm_eff.model, url = %llm_eff.base_url, "llm extraction enabled");
+    }
+    let llm_handle: llm::LlmHandle = Arc::new(tokio::sync::RwLock::new(llm::build_runtime(
+        llm_eff,
+        prompts,
+        Some(db.clone()),
+    )));
+
     let notifier: Arc<dyn Notify> = match NtfyNotifier::new(&config.notifications)
         .context("configuring ntfy notifier")?
     {
@@ -73,6 +86,9 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!(sources = sources.len(), "configuration loaded");
 
     let statuses: state::StatusMap = Arc::new(tokio::sync::RwLock::new(Default::default()));
+    // keep a handle on each source for its enrichment worker
+    let enrich_sources: Vec<Arc<dyn ImmoSource>> =
+        sources.iter().map(|(s, _)| s.clone()).collect();
     scheduler::spawn_all(
         sources,
         db.clone(),
@@ -80,6 +96,14 @@ async fn main() -> anyhow::Result<()> {
         notifier.clone(),
         statuses.clone(),
     );
+    for source in enrich_sources {
+        tokio::spawn(enrich::run_source_enricher(
+            source,
+            db.clone(),
+            config.enrichment.clone(),
+            llm_handle.clone(),
+        ));
+    }
 
     let mut app = api::router(state::AppState {
         db,
@@ -87,9 +111,16 @@ async fn main() -> anyhow::Result<()> {
         statuses,
         shared_locations,
         location_cap: config.scrape.max_search_locations,
+        llm: llm_handle.clone(),
+        llm_base: config.llm.clone(),
     })
     .layer(tower_http::cors::CorsLayer::permissive())
     .layer(tower_http::trace::TraceLayer::new_for_http());
+
+    let images_dir = enrich::images_root(&config.enrichment);
+    std::fs::create_dir_all(&images_dir).ok();
+    app = app.nest_service("/images", tower_http::services::ServeDir::new(&images_dir));
+
     if let Some(dir) = &config.static_dir {
         let index = dir.join("index.html");
         app = app.fallback_service(

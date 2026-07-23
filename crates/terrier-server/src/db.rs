@@ -671,7 +671,6 @@ impl Db {
         Ok(false)
     }
 
-    #[allow(dead_code)] // callers arrive with the enrichment worker / api tasks
     pub async fn enrichment_depth(&self) -> Result<i64> {
         let row = sqlx::query("SELECT COUNT(*) AS n FROM enrichment_queue")
             .fetch_one(&self.pool)

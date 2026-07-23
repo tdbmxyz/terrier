@@ -20,12 +20,10 @@ pub trait ImageFetch: Send + Sync {
     async fn fetch(&self, url: &str) -> anyhow::Result<Vec<u8>>;
 }
 
-#[allow(dead_code)] // wired up in the main-task
 pub struct HttpImageFetch {
     client: reqwest::Client,
 }
 
-#[allow(dead_code)] // wired up in the main-task
 impl HttpImageFetch {
     pub fn new() -> Self {
         Self {
@@ -119,7 +117,6 @@ pub async fn process_one(
 }
 
 /// The forever loop for one source.
-#[allow(dead_code)] // wired up in the main-task
 pub async fn run_source_enricher(
     source: Arc<dyn ImmoSource>,
     db: Db,
@@ -152,7 +149,6 @@ pub async fn run_source_enricher(
 }
 
 /// Resolve where a saved image lives on disk (also used by main to serve).
-#[allow(dead_code)] // wired up in the main-task
 pub fn images_root(config: &EnrichmentConfig) -> PathBuf {
     Path::new(&config.images_dir).to_path_buf()
 }

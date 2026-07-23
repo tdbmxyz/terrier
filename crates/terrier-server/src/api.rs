@@ -62,11 +62,18 @@ async fn status(State(state): State<AppState>) -> Result<Response, ApiError> {
     let mut sources: Vec<_> = state.statuses.read().await.values().cloned().collect();
     sources.sort_by(|a, b| a.source_id.cmp(&b.source_id));
     let search_matches = state.db.count_matches().await?;
+    let enrichment_pending = state.db.enrichment_depth().await?;
+    let llm = {
+        let runtime = state.llm.read().await;
+        let mut status = runtime.status.clone();
+        status.busy = runtime.busy.load(std::sync::atomic::Ordering::SeqCst);
+        Some(status)
+    };
     Ok(Json(terrier_domain::StatusResponse {
         sources,
         search_matches,
-        enrichment_pending: 0,
-        llm: None,
+        enrichment_pending,
+        llm,
     })
     .into_response())
 }
@@ -217,6 +224,8 @@ mod tests {
             statuses: Arc::new(tokio::sync::RwLock::new(Default::default())),
             shared_locations: Arc::new(tokio::sync::RwLock::new(Vec::new())),
             location_cap: 20,
+            llm: Default::default(),
+            llm_base: Default::default(),
         })
     }
 
@@ -277,6 +286,8 @@ mod tests {
             statuses: Arc::new(tokio::sync::RwLock::new(Default::default())),
             shared_locations: Arc::new(tokio::sync::RwLock::new(Vec::new())),
             location_cap: 20,
+            llm: Default::default(),
+            llm_base: Default::default(),
         });
         let resp = app
             .oneshot(Request::get("/api/listings").body(Body::empty()).unwrap())

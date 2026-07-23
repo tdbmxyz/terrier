@@ -38,7 +38,6 @@ pub struct LlmLogEntry {
     pub completion_tokens: Option<i64>,
 }
 
-#[allow(dead_code)] // callers arrive with the enrichment worker / api tasks
 pub struct OpenAiExtractor {
     http: reqwest::Client,
     url: String,
@@ -60,7 +59,6 @@ pub const PROMPTS_SETTINGS_KEY: &str = "prompts";
 
 /// Fully resolved LLM configuration, ready to build clients from.
 #[derive(Debug, Clone, PartialEq)]
-#[allow(dead_code)] // callers arrive with the enrichment worker / api tasks
 pub struct EffectiveLlm {
     pub enabled: bool,
     pub base_url: String,
@@ -74,7 +72,6 @@ pub struct EffectiveLlm {
 /// Merge the TOML base with an optional DB override. The key file is only
 /// read when the result is enabled — a broken path never blocks startup of
 /// a disabled pass.
-#[allow(dead_code)] // callers arrive with the enrichment worker / api tasks
 pub fn effective(base: &LlmConfig, o: Option<&LlmSettingsUpdate>) -> anyhow::Result<EffectiveLlm> {
     let pick = |over: &str, conf: &str| {
         if over.trim().is_empty() { conf.to_string() } else { over.trim().to_string() }
@@ -115,19 +112,16 @@ pub fn effective(base: &LlmConfig, o: Option<&LlmSettingsUpdate>) -> anyhow::Res
 #[derive(Clone, Default)]
 pub struct LlmRuntime {
     pub extractor: Option<std::sync::Arc<dyn LlmExtract>>,
-    #[allow(dead_code)] // callers arrive with the api task
     pub status: LlmStatus,
     #[allow(dead_code)] // callers arrive with the api task
     pub settings: LlmSettings,
     #[allow(dead_code)] // callers arrive with the api task
     pub prompts: LlmPrompts,
-    #[allow(dead_code)] // callers arrive with the api task
     pub busy: std::sync::Arc<std::sync::atomic::AtomicU32>,
 }
 
 pub type LlmHandle = std::sync::Arc<tokio::sync::RwLock<LlmRuntime>>;
 
-#[allow(dead_code)] // callers arrive with the enrichment worker / api tasks
 pub fn build_runtime(eff: EffectiveLlm, prompts: LlmPrompts, db: Option<crate::db::Db>) -> LlmRuntime {
     let busy = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
     let extractor = eff.enabled.then(|| {
@@ -164,7 +158,6 @@ pub fn build_runtime(eff: EffectiveLlm, prompts: LlmPrompts, db: Option<crate::d
     }
 }
 
-#[allow(dead_code)] // callers arrive with the enrichment worker / api tasks
 pub async fn load_override(db: &crate::db::Db) -> Option<LlmSettingsUpdate> {
     let raw = db.get_setting(LLM_SETTINGS_KEY).await.ok()??;
     serde_json::from_str(&raw)
@@ -172,7 +165,6 @@ pub async fn load_override(db: &crate::db::Db) -> Option<LlmSettingsUpdate> {
         .ok()
 }
 
-#[allow(dead_code)] // callers arrive with the enrichment worker / api tasks
 pub async fn load_prompts(db: &crate::db::Db) -> Option<LlmPrompts> {
     let raw = db.get_setting(PROMPTS_SETTINGS_KEY).await.ok()??;
     serde_json::from_str(&raw)
@@ -210,7 +202,6 @@ pub fn default_prompts() -> LlmPrompts {
 }
 
 /// Stored override merged over the defaults (empty field = default).
-#[allow(dead_code)] // callers arrive with the enrichment worker / api tasks
 pub fn effective_prompts(stored: Option<&LlmPrompts>) -> LlmPrompts {
     let defaults = default_prompts();
     let Some(stored) = stored else { return defaults };

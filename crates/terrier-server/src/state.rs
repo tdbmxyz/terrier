@@ -44,4 +44,8 @@ pub struct AppState {
     pub statuses: StatusMap,
     pub shared_locations: SharedLocations,
     pub location_cap: usize,
+    pub llm: crate::llm::LlmHandle,
+    /// TOML base for the [llm] section (settings PUT merges over it).
+    #[allow(dead_code)] // callers arrive with the api task
+    pub llm_base: crate::config::LlmConfig,
 }
