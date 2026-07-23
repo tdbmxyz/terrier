@@ -34,3 +34,20 @@ max_search_locations = 20    # search locations merged into the scrape rotation
 # ntfy_url = "https://notify.zeus.balem.fr"
 # topic = "terrier"
 # token_file = "/run/agenix/terrier-ntfy-token"
+
+[enrichment]
+# queue poll cadence per source; detail pages go through the same
+# politeness budget as scraping
+poll_seconds = 60
+max_attempts = 8
+max_images = 10
+images_dir = "images"
+
+[llm]
+# structured extraction from descriptions via any OpenAI-compatible
+# endpoint (llama.cpp). Fail-open: scraping never depends on it.
+enabled = false
+base_url = "http://127.0.0.1:8080/v1"
+model = ""
+# api_key_file = "/run/secrets/llm-key"
+timeout_secs = 120

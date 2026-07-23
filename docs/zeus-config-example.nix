@@ -36,6 +36,24 @@
         ntfy_url = "https://notify.zeus.balem.fr";
         topic = "terrier";
       };
+
+      # Detail-page enrichment: images + structured attributes on new
+      # listings and price changes.
+      enrichment = {
+        poll_seconds = 60;
+        max_attempts = 8;
+        max_images = 10;
+        images_dir = "images";
+      };
+
+      # LLM extraction via the zeus llama.cpp server. Fail-open: scraping
+      # never depends on it.
+      llm = {
+        enabled = true;
+        base_url = "http://127.0.0.1:8080/v1";
+        model = "";
+        timeout_secs = 120;
+      };
     };
   };
 }

@@ -61,7 +61,9 @@ pub fn App(config: AppConfig) -> impl IntoView {
 
     let save_server = move |_| {
         let value = server.get_untracked();
-        let Some(window) = web_sys::window() else { return };
+        let Some(window) = web_sys::window() else {
+            return;
+        };
         if let Ok(Some(storage)) = window.local_storage() {
             if value.trim().is_empty() || Url::parse(value.trim()).is_err() {
                 let _ = storage.remove_item(API_BASE_KEY);

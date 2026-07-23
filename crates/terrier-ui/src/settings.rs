@@ -99,7 +99,9 @@ pub fn SettingsView() -> impl IntoView {
         let client = client.clone();
         move |_| {
             let client = client.clone();
-            let p = LlmPrompts { extract: prompt.get_untracked() };
+            let p = LlmPrompts {
+                extract: prompt.get_untracked(),
+            };
             spawn_local(async move {
                 match client.update_llm_prompts(&p).await {
                     Ok(p) => {

@@ -23,9 +23,15 @@ pub fn router(state: AppState) -> Router {
             axum::routing::put(update_search).delete(delete_search),
         )
         .route("/api/listings", get(list_listings))
-        .route("/api/listings/{id}/moderation", axum::routing::put(set_moderation))
+        .route(
+            "/api/listings/{id}/moderation",
+            axum::routing::put(set_moderation),
+        )
         .route("/api/communes", get(commune_stats))
-        .route("/api/settings/llm", get(get_llm_settings).put(put_llm_settings))
+        .route(
+            "/api/settings/llm",
+            get(get_llm_settings).put(put_llm_settings),
+        )
         .route("/api/settings/prompts", get(get_prompts).put(put_prompts))
         .route("/api/llm/models", get(llm_models))
         .route("/api/llm/probe", axum::routing::post(llm_probe))
@@ -117,15 +123,15 @@ async fn create_search(
 
 /// Match all stored listings against a fresh/updated search; one summary
 /// push instead of one per listing.
-async fn retro_match(
-    state: &AppState,
-    search: &terrier_domain::Search,
-) -> anyhow::Result<u64> {
+async fn retro_match(state: &AppState, search: &terrier_domain::Search) -> anyhow::Result<u64> {
     let mut matched = 0u64;
     for listing in state.db.list_listings(None, false).await? {
         if terrier_domain::search_matches(search, &listing) {
             if state.db.insert_match(listing.id, search.id).await? {
-                state.db.mark_notified(listing.id, search.id, listing.price_cents).await?;
+                state
+                    .db
+                    .mark_notified(listing.id, search.id, listing.price_cents)
+                    .await?;
             }
             matched += 1;
         }
@@ -397,10 +403,15 @@ mod tests {
         let db = Db::connect(FsPath::new(":memory:")).await.unwrap();
         let l = crate::db::tests_listing_helper("https://x/1", 30_000_000);
         let (stored, _) = db.upsert_listing(&l).await.unwrap();
-        db.add_image_urls(stored.id, &["https://cdn/a.jpg".into(), "https://cdn/b.jpg".into()])
+        db.add_image_urls(
+            stored.id,
+            &["https://cdn/a.jpg".into(), "https://cdn/b.jpg".into()],
+        )
+        .await
+        .unwrap();
+        db.mark_image_saved(stored.id, 0, &format!("{}/0.jpg", stored.id))
             .await
             .unwrap();
-        db.mark_image_saved(stored.id, 0, &format!("{}/0.jpg", stored.id)).await.unwrap();
         let app = router(AppState {
             db,
             notifier: Arc::new(crate::notify::NoopNotifier),
@@ -416,8 +427,14 @@ mod tests {
             .unwrap();
         let listings: Vec<ListingWithHistory> = body_json(resp).await;
         assert_eq!(listings[0].images.len(), 2);
-        assert_eq!(listings[0].images[0].url, format!("/images/{}/0.jpg", stored.id));
-        assert_eq!(listings[0].images[1].url, "https://cdn/b.jpg", "not yet local: CDN url");
+        assert_eq!(
+            listings[0].images[0].url,
+            format!("/images/{}/0.jpg", stored.id)
+        );
+        assert_eq!(
+            listings[0].images[1].url, "https://cdn/b.jpg",
+            "not yet local: CDN url"
+        );
     }
 
     #[tokio::test]
@@ -425,7 +442,11 @@ mod tests {
         let app = app().await;
         let resp = app
             .clone()
-            .oneshot(Request::get("/api/settings/llm").body(Body::empty()).unwrap())
+            .oneshot(
+                Request::get("/api/settings/llm")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
             .await
             .unwrap();
         let s: terrier_domain::LlmSettings = body_json(resp).await;

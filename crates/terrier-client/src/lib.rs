@@ -33,7 +33,10 @@ pub struct TerrierClient {
 
 impl TerrierClient {
     pub fn new(base: Url) -> Self {
-        Self { base, http: reqwest::Client::new() }
+        Self {
+            base,
+            http: reqwest::Client::new(),
+        }
     }
 
     pub fn base(&self) -> &Url {
@@ -51,8 +54,9 @@ impl TerrierClient {
         request: reqwest::RequestBuilder,
         timeout: Duration,
     ) -> Result<T> {
-        let mut request =
-            request.build().map_err(|e| ClientError::Transport(e.to_string()))?;
+        let mut request = request
+            .build()
+            .map_err(|e| ClientError::Transport(e.to_string()))?;
         *request.timeout_mut() = Some(timeout);
         let response = self
             .http
@@ -62,7 +66,10 @@ impl TerrierClient {
         let status = response.status();
         if !status.is_success() {
             let message = response.text().await.unwrap_or_default();
-            return Err(ClientError::Api { status: status.as_u16(), message });
+            return Err(ClientError::Api {
+                status: status.as_u16(),
+                message,
+            });
         }
         response
             .json()
@@ -71,8 +78,9 @@ impl TerrierClient {
     }
 
     async fn send_empty(&self, request: reqwest::RequestBuilder) -> Result<()> {
-        let mut request =
-            request.build().map_err(|e| ClientError::Transport(e.to_string()))?;
+        let mut request = request
+            .build()
+            .map_err(|e| ClientError::Transport(e.to_string()))?;
         *request.timeout_mut() = Some(DATA_TIMEOUT);
         let response = self
             .http
@@ -82,31 +90,42 @@ impl TerrierClient {
         let status = response.status();
         if !status.is_success() {
             let message = response.text().await.unwrap_or_default();
-            return Err(ClientError::Api { status: status.as_u16(), message });
+            return Err(ClientError::Api {
+                status: status.as_u16(),
+                message,
+            });
         }
         Ok(())
     }
 
     pub async fn health(&self) -> Result<HealthResponse> {
-        self.send(self.http.get(self.url("api/health")?), HEALTH_TIMEOUT).await
+        self.send(self.http.get(self.url("api/health")?), HEALTH_TIMEOUT)
+            .await
     }
 
     pub async fn status(&self) -> Result<StatusResponse> {
-        self.send(self.http.get(self.url("api/status")?), DATA_TIMEOUT).await
+        self.send(self.http.get(self.url("api/status")?), DATA_TIMEOUT)
+            .await
     }
 
     pub async fn searches(&self) -> Result<Vec<Search>> {
-        self.send(self.http.get(self.url("api/searches")?), DATA_TIMEOUT).await
+        self.send(self.http.get(self.url("api/searches")?), DATA_TIMEOUT)
+            .await
     }
 
     pub async fn create_search(&self, request: &SearchRequest) -> Result<Search> {
-        self.send(self.http.post(self.url("api/searches")?).json(request), DATA_TIMEOUT)
-            .await
+        self.send(
+            self.http.post(self.url("api/searches")?).json(request),
+            DATA_TIMEOUT,
+        )
+        .await
     }
 
     pub async fn update_search(&self, id: Uuid, request: &SearchRequest) -> Result<Search> {
         self.send(
-            self.http.put(self.url(&format!("api/searches/{id}"))?).json(request),
+            self.http
+                .put(self.url(&format!("api/searches/{id}"))?)
+                .json(request),
             DATA_TIMEOUT,
         )
         .await
@@ -129,7 +148,8 @@ impl TerrierClient {
             (None, true) => "api/listings?hidden=true".into(),
             (None, false) => "api/listings".into(),
         };
-        self.send(self.http.get(self.url(&path)?), DATA_TIMEOUT).await
+        self.send(self.http.get(self.url(&path)?), DATA_TIMEOUT)
+            .await
     }
 
     pub async fn set_moderation(&self, listing_id: Uuid, moderation: Moderation) -> Result<()> {
@@ -146,25 +166,39 @@ impl TerrierClient {
     }
 
     pub async fn communes(&self) -> Result<Vec<CommuneStat>> {
-        self.send(self.http.get(self.url("api/communes")?), DATA_TIMEOUT).await
+        self.send(self.http.get(self.url("api/communes")?), DATA_TIMEOUT)
+            .await
     }
 
     pub async fn llm_settings(&self) -> Result<LlmSettings> {
-        self.send(self.http.get(self.url("api/settings/llm")?), DATA_TIMEOUT).await
+        self.send(self.http.get(self.url("api/settings/llm")?), DATA_TIMEOUT)
+            .await
     }
 
     pub async fn update_llm_settings(&self, update: &LlmSettingsUpdate) -> Result<LlmSettings> {
-        self.send(self.http.put(self.url("api/settings/llm")?).json(update), DATA_TIMEOUT)
-            .await
+        self.send(
+            self.http.put(self.url("api/settings/llm")?).json(update),
+            DATA_TIMEOUT,
+        )
+        .await
     }
 
     pub async fn llm_prompts(&self) -> Result<LlmPrompts> {
-        self.send(self.http.get(self.url("api/settings/prompts")?), DATA_TIMEOUT).await
+        self.send(
+            self.http.get(self.url("api/settings/prompts")?),
+            DATA_TIMEOUT,
+        )
+        .await
     }
 
     pub async fn update_llm_prompts(&self, prompts: &LlmPrompts) -> Result<LlmPrompts> {
-        self.send(self.http.put(self.url("api/settings/prompts")?).json(prompts), DATA_TIMEOUT)
-            .await
+        self.send(
+            self.http
+                .put(self.url("api/settings/prompts")?)
+                .json(prompts),
+            DATA_TIMEOUT,
+        )
+        .await
     }
 
     pub async fn llm_models(&self, base_url: &str) -> Result<Vec<String>> {
@@ -172,7 +206,8 @@ impl TerrierClient {
             "api/llm/models?base_url={}",
             url::form_urlencoded::byte_serialize(base_url.as_bytes()).collect::<String>()
         );
-        self.send(self.http.get(self.url(&path)?), DATA_TIMEOUT).await
+        self.send(self.http.get(self.url(&path)?), DATA_TIMEOUT)
+            .await
     }
 
     /// The settings panel's "Test": one tiny completion (slow local models).
@@ -202,7 +237,10 @@ impl TerrierClient {
         let status = response.status();
         if !status.is_success() {
             let message = response.text().await.unwrap_or_default();
-            return Err(ClientError::Api { status: status.as_u16(), message });
+            return Err(ClientError::Api {
+                status: status.as_u16(),
+                message,
+            });
         }
         Ok(())
     }

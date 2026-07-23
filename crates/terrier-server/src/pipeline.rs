@@ -149,7 +149,8 @@ pub async fn process_listings(
                         "default",
                     )
                     .await;
-                db.mark_notified(stored.id, search.id, stored.price_cents).await?;
+                db.mark_notified(stored.id, search.id, stored.price_cents)
+                    .await?;
                 stats.notified += 1;
             } else if let Some(prev) = db.notified_price(stored.id, search.id).await?
                 && (stored.price_cents as f64)
@@ -169,7 +170,8 @@ pub async fn process_listings(
                         "default",
                     )
                     .await;
-                db.mark_notified(stored.id, search.id, stored.price_cents).await?;
+                db.mark_notified(stored.id, search.id, stored.price_cents)
+                    .await?;
                 stats.notified += 1;
             }
         }
@@ -196,7 +198,10 @@ mod tests {
     #[async_trait::async_trait]
     impl Notify for MockNotifier {
         async fn send(&self, title: &str, message: &str, _tags: &str, _priority: &str) {
-            self.sent.lock().unwrap().push((title.to_string(), message.to_string()));
+            self.sent
+                .lock()
+                .unwrap()
+                .push((title.to_string(), message.to_string()));
         }
     }
 
@@ -238,36 +243,63 @@ mod tests {
         })
         .await
         .unwrap();
-        (db, MockNotifier { sent: Mutex::new(Vec::new()) })
+        (
+            db,
+            MockNotifier {
+                sent: Mutex::new(Vec::new()),
+            },
+        )
     }
 
     async fn run(db: &Db, listings: Vec<RawListing>, notifier: &MockNotifier) -> PipelineStats {
-        process_listings(db, &ScrapeConfig::default(), "leboncoin-immo", listings, notifier, true)
-            .await
-            .unwrap()
+        process_listings(
+            db,
+            &ScrapeConfig::default(),
+            "leboncoin-immo",
+            listings,
+            notifier,
+            true,
+        )
+        .await
+        .unwrap()
     }
 
     #[tokio::test]
     async fn new_match_notifies_with_m2_price() {
         let (db, notifier) = setup().await;
-        let stats =
-            run(&db, vec![raw("https://x/1", 32_000_000, "Maison 5 pièces Bruz")], &notifier)
-                .await;
+        let stats = run(
+            &db,
+            vec![raw("https://x/1", 32_000_000, "Maison 5 pièces Bruz")],
+            &notifier,
+        )
+        .await;
         assert_eq!(stats.new_listings, 1);
         assert_eq!(stats.notified, 1);
         let sent = notifier.sent.lock().unwrap();
         assert!(sent[0].0.contains("320000 €"), "title: {}", sent[0].0);
-        assert!(sent[0].1.contains("3200 €/m²"), "€/m² in the push: {}", sent[0].1);
+        assert!(
+            sent[0].1.contains("3200 €/m²"),
+            "€/m² in the push: {}",
+            sent[0].1
+        );
         assert!(sent[0].1.contains("Bruz"));
     }
 
     #[tokio::test]
     async fn price_drop_renotifies_and_records_history() {
         let (db, notifier) = setup().await;
-        run(&db, vec![raw("https://x/1", 32_000_000, "Maison 5 pièces Bruz")], &notifier).await;
-        let stats =
-            run(&db, vec![raw("https://x/1", 30_000_000, "Maison 5 pièces Bruz")], &notifier)
-                .await;
+        run(
+            &db,
+            vec![raw("https://x/1", 32_000_000, "Maison 5 pièces Bruz")],
+            &notifier,
+        )
+        .await;
+        let stats = run(
+            &db,
+            vec![raw("https://x/1", 30_000_000, "Maison 5 pièces Bruz")],
+            &notifier,
+        )
+        .await;
         assert_eq!(stats.notified, 1, "6% drop re-notifies");
         let sent = notifier.sent.lock().unwrap();
         assert!(sent[1].0.contains("320000 € → 300000 €"), "{}", sent[1].0);
@@ -277,11 +309,19 @@ mod tests {
     #[tokio::test]
     async fn tiny_price_wiggle_stays_silent() {
         let (db, notifier) = setup().await;
-        run(&db, vec![raw("https://x/1", 32_000_000, "Maison 5 pièces Bruz")], &notifier).await;
+        run(
+            &db,
+            vec![raw("https://x/1", 32_000_000, "Maison 5 pièces Bruz")],
+            &notifier,
+        )
+        .await;
         // -0.3% < renotify_drop_pct (1%) → recorded, not pushed
-        let stats =
-            run(&db, vec![raw("https://x/1", 31_900_000, "Maison 5 pièces Bruz")], &notifier)
-                .await;
+        let stats = run(
+            &db,
+            vec![raw("https://x/1", 31_900_000, "Maison 5 pièces Bruz")],
+            &notifier,
+        )
+        .await;
         assert_eq!(stats.notified, 0);
         assert_eq!(notifier.sent.lock().unwrap().len(), 1);
     }
@@ -289,9 +329,12 @@ mod tests {
     #[tokio::test]
     async fn wanted_ads_match_silently() {
         let (db, notifier) = setup().await;
-        let stats =
-            run(&db, vec![raw("https://x/1", 30_000_000, "Recherche maison Bruz")], &notifier)
-                .await;
+        let stats = run(
+            &db,
+            vec![raw("https://x/1", 30_000_000, "Recherche maison Bruz")],
+            &notifier,
+        )
+        .await;
         assert_eq!(stats.suppressed, 1);
         assert!(notifier.sent.lock().unwrap().is_empty());
     }
@@ -302,7 +345,11 @@ mod tests {
         let mut r = raw("https://x/1", 32_000_000, "Maison 5 pièces Bruz");
         r.image_urls = vec!["https://cdn/a.jpg".into()];
         run(&db, vec![r.clone()], &notifier).await;
-        assert_eq!(db.enrichment_depth().await.unwrap(), 1, "new listing enqueued");
+        assert_eq!(
+            db.enrichment_depth().await.unwrap(),
+            1,
+            "new listing enqueued"
+        );
         // baseline image urls stored from the search page
         let listings = db.list_listings(None, false).await.unwrap();
         let images = db.images_for(&[listings[0].id]).await.unwrap();
@@ -310,22 +357,38 @@ mod tests {
 
         db.enrichment_done(listings[0].id).await.unwrap();
         run(&db, vec![r.clone()], &notifier).await;
-        assert_eq!(db.enrichment_depth().await.unwrap(), 0, "unchanged: not re-enqueued");
+        assert_eq!(
+            db.enrichment_depth().await.unwrap(),
+            0,
+            "unchanged: not re-enqueued"
+        );
 
         r.price_cents = 30_000_000;
         run(&db, vec![r], &notifier).await;
-        assert_eq!(db.enrichment_depth().await.unwrap(), 1, "price change re-enqueued");
+        assert_eq!(
+            db.enrichment_depth().await.unwrap(),
+            1,
+            "price change re-enqueued"
+        );
     }
 
     #[tokio::test]
     async fn unseen_listing_goes_gone_and_revives_silently() {
         let (db, notifier) = setup().await;
-        run(&db, vec![raw("https://x/1", 32_000_000, "Maison 5 pièces Bruz")], &notifier).await;
+        run(
+            &db,
+            vec![raw("https://x/1", 32_000_000, "Maison 5 pièces Bruz")],
+            &notifier,
+        )
+        .await;
         let stats = run(&db, vec![], &notifier).await;
         assert_eq!(stats.gone, 1);
-        let stats =
-            run(&db, vec![raw("https://x/1", 32_000_000, "Maison 5 pièces Bruz")], &notifier)
-                .await;
+        let stats = run(
+            &db,
+            vec![raw("https://x/1", 32_000_000, "Maison 5 pièces Bruz")],
+            &notifier,
+        )
+        .await;
         assert_eq!(stats.gone, 0);
         assert_eq!(stats.notified, 0, "revival is not a fresh match");
     }

@@ -86,7 +86,8 @@ pub async fn process_one(
         std::fs::create_dir_all(&dir)?;
         let file = format!("{position}.{}", extension_of(&url));
         std::fs::write(dir.join(&file), &bytes)?;
-        db.mark_image_saved(id, position, &format!("{id}/{file}")).await?;
+        db.mark_image_saved(id, position, &format!("{id}/{file}"))
+            .await?;
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
 
@@ -132,7 +133,10 @@ pub async fn run_source_enricher(
                         process_one(&db, source.as_ref(), &images, &llm, &config, id).await
                     {
                         tracing::warn!(source = source.id(), %id, error = %e, "enrichment failed");
-                        match db.enrichment_failed(id, &e.to_string(), config.max_attempts).await {
+                        match db
+                            .enrichment_failed(id, &e.to_string(), config.max_attempts)
+                            .await
+                        {
                             Ok(true) => {
                                 tracing::warn!(%id, "enrichment given up after max attempts")
                             }
@@ -198,7 +202,10 @@ mod tests {
         async fn extract(&self, input: &ExtractInput<'_>) -> anyhow::Result<ExtractedAttrs> {
             *self.calls.lock().unwrap() += 1;
             assert!(input.description.contains("full description"));
-            Ok(ExtractedAttrs { fibre: Some(true), ..Default::default() })
+            Ok(ExtractedAttrs {
+                fibre: Some(true),
+                ..Default::default()
+            })
         }
     }
 
@@ -220,7 +227,10 @@ mod tests {
     }
 
     fn config(dir: &FsPath) -> EnrichmentConfig {
-        EnrichmentConfig { images_dir: dir.to_path_buf(), ..Default::default() }
+        EnrichmentConfig {
+            images_dir: dir.to_path_buf(),
+            ..Default::default()
+        }
     }
 
     #[tokio::test]
@@ -228,24 +238,40 @@ mod tests {
         let tmp = std::env::temp_dir().join(format!("terrier-test-{}", Uuid::new_v4()));
         let detail = ListingDetail {
             description: Some("the full description".into()),
-            image_urls: vec!["https://cdn/a.jpg".into(), "https://cdn/b.webp?rule=x".into()],
+            image_urls: vec![
+                "https://cdn/a.jpg".into(),
+                "https://cdn/b.webp?rule=x".into(),
+            ],
             ..Default::default()
         };
         let (db, id) = setup().await;
-        let source = FakeSource { detail: Some(detail), fail: false };
-        let llm_impl = Arc::new(FakeLlm { calls: Mutex::new(0) });
+        let source = FakeSource {
+            detail: Some(detail),
+            fail: false,
+        };
+        let llm_impl = Arc::new(FakeLlm {
+            calls: Mutex::new(0),
+        });
         let llm = llm_handle(Some(llm_impl.clone()));
 
-        process_one(&db, &source, &FakeImages, &llm, &config(&tmp), id).await.unwrap();
+        process_one(&db, &source, &FakeImages, &llm, &config(&tmp), id)
+            .await
+            .unwrap();
 
         let st = db.enrichment_state(id).await.unwrap();
         assert!(st.enriched_at.is_some() && st.extracted_at.is_some());
-        assert_eq!(st.listing.description.as_deref(), Some("the full description"));
+        assert_eq!(
+            st.listing.description.as_deref(),
+            Some("the full description")
+        );
         assert_eq!(st.listing.attributes.fibre, Some(true));
         assert_eq!(*llm_impl.calls.lock().unwrap(), 1);
         assert!(db.pending_images(id, 10).await.unwrap().is_empty());
         assert!(tmp.join(id.to_string()).join("0.jpg").exists());
-        assert!(tmp.join(id.to_string()).join("1.webp").exists(), "query string stripped");
+        assert!(
+            tmp.join(id.to_string()).join("1.webp").exists(),
+            "query string stripped"
+        );
         assert_eq!(db.enrichment_depth().await.unwrap(), 0, "dequeued");
         std::fs::remove_dir_all(&tmp).ok();
     }
@@ -254,12 +280,25 @@ mod tests {
     async fn no_detail_support_and_no_llm_still_completes() {
         let tmp = std::env::temp_dir().join(format!("terrier-test-{}", Uuid::new_v4()));
         let (db, id) = setup().await;
-        let source = FakeSource { detail: None, fail: false };
-        process_one(&db, &source, &FakeImages, &llm_handle(None), &config(&tmp), id)
-            .await
-            .unwrap();
+        let source = FakeSource {
+            detail: None,
+            fail: false,
+        };
+        process_one(
+            &db,
+            &source,
+            &FakeImages,
+            &llm_handle(None),
+            &config(&tmp),
+            id,
+        )
+        .await
+        .unwrap();
         let st = db.enrichment_state(id).await.unwrap();
-        assert!(st.enriched_at.is_some(), "marked enriched even without detail");
+        assert!(
+            st.enriched_at.is_some(),
+            "marked enriched even without detail"
+        );
         assert!(st.extracted_at.is_none(), "no llm: no extraction claim");
         assert_eq!(db.enrichment_depth().await.unwrap(), 0);
     }
@@ -268,12 +307,26 @@ mod tests {
     async fn detail_failure_propagates_for_retry() {
         let tmp = std::env::temp_dir().join(format!("terrier-test-{}", Uuid::new_v4()));
         let (db, id) = setup().await;
-        let source = FakeSource { detail: None, fail: true };
-        let err = process_one(&db, &source, &FakeImages, &llm_handle(None), &config(&tmp), id)
-            .await
-            .unwrap_err();
+        let source = FakeSource {
+            detail: None,
+            fail: true,
+        };
+        let err = process_one(
+            &db,
+            &source,
+            &FakeImages,
+            &llm_handle(None),
+            &config(&tmp),
+            id,
+        )
+        .await
+        .unwrap_err();
         assert!(err.to_string().contains("blocked"));
-        assert_eq!(db.enrichment_depth().await.unwrap(), 1, "stays queued for retry");
+        assert_eq!(
+            db.enrichment_depth().await.unwrap(),
+            1,
+            "stays queued for retry"
+        );
     }
 
     #[test]

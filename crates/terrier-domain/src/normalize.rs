@@ -117,7 +117,9 @@ mod tests {
         assert!(is_wanted_ad("ACHAT rtx 3090"));
         assert!(is_wanted_ad("Achète carte graphique"));
         // selling listings that merely contain the words elsewhere
-        assert!(!is_wanted_ad("RTX 4090 état neuf, recherche nouveau proprio"));
+        assert!(!is_wanted_ad(
+            "RTX 4090 état neuf, recherche nouveau proprio"
+        ));
         assert!(!is_wanted_ad("PC gamer rtx 5090"));
     }
 

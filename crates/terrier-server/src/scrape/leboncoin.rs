@@ -51,7 +51,11 @@ pub fn curl_args(url: &str) -> Vec<String> {
 
 fn attr<'a>(ad: &'a serde_json::Value, key: &str) -> Option<&'a str> {
     ad["attributes"].as_array()?.iter().find_map(|a| {
-        if a["key"].as_str() == Some(key) { a["value"].as_str() } else { None }
+        if a["key"].as_str() == Some(key) {
+            a["value"].as_str()
+        } else {
+            None
+        }
     })
 }
 
@@ -69,7 +73,11 @@ fn image_urls(ad: &serde_json::Value) -> Vec<String> {
     ad["images"]["urls_large"]
         .as_array()
         .or_else(|| ad["images"]["urls"].as_array())
-        .map(|a| a.iter().filter_map(|u| u.as_str().map(str::to_string)).collect())
+        .map(|a| {
+            a.iter()
+                .filter_map(|u| u.as_str().map(str::to_string))
+                .collect()
+        })
         .unwrap_or_default()
 }
 
@@ -82,7 +90,10 @@ fn seller(ad: &serde_json::Value) -> Option<Seller> {
     Some(Seller {
         kind,
         name: ad["owner"]["name"].as_str().map(str::to_string),
-        siren: ad["owner"]["siren"].as_str().or_else(|| attr(ad, "siren")).map(str::to_string),
+        siren: ad["owner"]["siren"]
+            .as_str()
+            .or_else(|| attr(ad, "siren"))
+            .map(str::to_string),
     })
 }
 
@@ -145,10 +156,14 @@ pub fn parse_search_page(html: &str) -> anyhow::Result<Vec<RawListing>> {
             lat: location["lat"].as_f64(),
             lng: location["lng"].as_f64(),
             dpe: attr(ad, "energy_rate")
-                .filter(|v| ["a", "b", "c", "d", "e", "f", "g"].contains(&v.to_lowercase().as_str()))
+                .filter(|v| {
+                    ["a", "b", "c", "d", "e", "f", "g"].contains(&v.to_lowercase().as_str())
+                })
                 .map(|v| v.to_lowercase()),
             ges: attr(ad, "ges")
-                .filter(|v| ["a", "b", "c", "d", "e", "f", "g"].contains(&v.to_lowercase().as_str()))
+                .filter(|v| {
+                    ["a", "b", "c", "d", "e", "f", "g"].contains(&v.to_lowercase().as_str())
+                })
                 .map(|v| v.to_lowercase()),
             sell_type: attr(ad, "immo_sell_type").map(str::to_string),
             description: ad["body"].as_str().map(str::to_string),
@@ -164,7 +179,10 @@ pub fn parse_search_page(html: &str) -> anyhow::Result<Vec<RawListing>> {
 pub fn parse_ad_page(html: &str) -> anyhow::Result<terrier_domain::ListingDetail> {
     let data = next_data(html)?;
     let ad = &data["props"]["pageProps"]["ad"];
-    anyhow::ensure!(ad.is_object(), "no props.pageProps.ad (blocked page or new layout)");
+    anyhow::ensure!(
+        ad.is_object(),
+        "no props.pageProps.ad (blocked page or new layout)"
+    );
     Ok(terrier_domain::ListingDetail {
         description: ad["body"].as_str().map(str::to_string),
         address: ad["location"]["street"]
@@ -189,7 +207,11 @@ impl LeboncoinSource {
         client: ScrapeClient,
         extra: Option<crate::state::SharedLocations>,
     ) -> Self {
-        Self { config, client, extra }
+        Self {
+            config,
+            client,
+            extra,
+        }
     }
 
     async fn fetch_page(&self, url: &str) -> anyhow::Result<String> {
@@ -227,7 +249,11 @@ async fn fetch_via_curl(url: &str) -> anyhow::Result<String> {
         .output()
         .await
         .map_err(|e| anyhow::anyhow!("spawning curl: {e}"))?;
-    anyhow::ensure!(output.status.success(), "curl failed with {} on {url}", output.status);
+    anyhow::ensure!(
+        output.status.success(),
+        "curl failed with {} on {url}",
+        output.status
+    );
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
@@ -310,7 +336,12 @@ mod tests {
         assert_eq!(flat.sell_type.as_deref(), Some("old"));
         assert_eq!(flat.image_urls.len(), 2);
         assert!(flat.image_urls[0].ends_with("pent-1.jpg"));
-        assert!(flat.description.as_deref().unwrap().starts_with("Penthouse d'exception"));
+        assert!(
+            flat.description
+                .as_deref()
+                .unwrap()
+                .starts_with("Penthouse d'exception")
+        );
         let seller = flat.seller.as_ref().unwrap();
         assert_eq!(seller.kind, SellerKind::Pro);
         assert_eq!(seller.name.as_deref(), Some("Agence Horizon"));
@@ -338,10 +369,18 @@ mod tests {
     fn parses_ad_detail_page() {
         let html = include_str!("../../tests/fixtures/leboncoin_immo_ad.html");
         let d = parse_ad_page(html).unwrap();
-        assert!(d.description.as_deref().unwrap().contains("Copropriété de 24 lots"));
+        assert!(
+            d.description
+                .as_deref()
+                .unwrap()
+                .contains("Copropriété de 24 lots")
+        );
         assert_eq!(d.image_urls.len(), 3);
         assert_eq!(d.address.as_deref(), Some("Rue de la Monnaie"));
-        assert_eq!(d.seller.as_ref().unwrap().siren.as_deref(), Some("123456789"));
+        assert_eq!(
+            d.seller.as_ref().unwrap().siren.as_deref(),
+            Some("123456789")
+        );
     }
 
     #[test]

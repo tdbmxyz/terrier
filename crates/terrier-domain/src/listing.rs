@@ -313,6 +313,9 @@ mod tests {
     #[test]
     fn seller_kind_serializes_kebab_case() {
         assert_eq!(serde_json::to_string(&SellerKind::Pro).unwrap(), "\"pro\"");
-        assert_eq!(serde_json::to_string(&SellerKind::Private).unwrap(), "\"private\"");
+        assert_eq!(
+            serde_json::to_string(&SellerKind::Private).unwrap(),
+            "\"private\""
+        );
     }
 }

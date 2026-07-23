@@ -43,19 +43,17 @@ async fn main() -> anyhow::Result<()> {
         Some(db.clone()),
     )));
 
-    let notifier: Arc<dyn Notify> = match NtfyNotifier::new(&config.notifications)
-        .context("configuring ntfy notifier")?
-    {
-        Some(n) => {
-            tracing::info!("ntfy notifications enabled");
-            Arc::new(n)
-        }
-        None => Arc::new(NoopNotifier),
-    };
+    let notifier: Arc<dyn Notify> =
+        match NtfyNotifier::new(&config.notifications).context("configuring ntfy notifier")? {
+            Some(n) => {
+                tracing::info!("ntfy notifications enabled");
+                Arc::new(n)
+            }
+            None => Arc::new(NoopNotifier),
+        };
 
     // active searches' locations feed the scrape rotation
-    let shared_locations: state::SharedLocations =
-        Arc::new(tokio::sync::RwLock::new(Vec::new()));
+    let shared_locations: state::SharedLocations = Arc::new(tokio::sync::RwLock::new(Vec::new()));
     state::refresh_search_locations(&db, &shared_locations, config.scrape.max_search_locations)
         .await
         .context("loading search locations")?;
@@ -63,8 +61,7 @@ async fn main() -> anyhow::Result<()> {
     let mut sources: Vec<(Arc<dyn ImmoSource>, Duration)> = Vec::new();
     if config.leboncoin.enabled {
         let lbc = &config.leboncoin;
-        let client =
-            politeness::scrape_client(Duration::from_millis(lbc.delay_ms), 1);
+        let client = politeness::scrape_client(Duration::from_millis(lbc.delay_ms), 1);
         sources.push((
             Arc::new(scrape::leboncoin::LeboncoinSource::new(
                 lbc.clone(),
@@ -87,8 +84,7 @@ async fn main() -> anyhow::Result<()> {
 
     let statuses: state::StatusMap = Arc::new(tokio::sync::RwLock::new(Default::default()));
     // keep a handle on each source for its enrichment worker
-    let enrich_sources: Vec<Arc<dyn ImmoSource>> =
-        sources.iter().map(|(s, _)| s.clone()).collect();
+    let enrich_sources: Vec<Arc<dyn ImmoSource>> = sources.iter().map(|(s, _)| s.clone()).collect();
     scheduler::spawn_all(
         sources,
         db.clone(),

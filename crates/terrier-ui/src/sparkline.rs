@@ -3,8 +3,8 @@
 //! labels in muted ink (text never wears the series color). One
 //! observation renders as a dot, not a line.
 
-use terrier_domain::PricePoint;
 use leptos::prelude::*;
+use terrier_domain::PricePoint;
 
 const W: f64 = 220.0;
 const H: f64 = 48.0;
@@ -21,7 +21,11 @@ pub(crate) fn polyline_points(prices: &[i64]) -> String {
         .iter()
         .fold((i64::MAX, i64::MIN), |(lo, hi), &p| (lo.min(p), hi.max(p)));
     let span = (max - min).max(1) as f64;
-    let step = if n > 1 { (W - 2.0 * PAD) / (n - 1) as f64 } else { 0.0 };
+    let step = if n > 1 {
+        (W - 2.0 * PAD) / (n - 1) as f64
+    } else {
+        0.0
+    };
     prices
         .iter()
         .enumerate()

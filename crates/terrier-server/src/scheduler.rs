@@ -26,7 +26,11 @@ pub struct FailureState {
 
 impl FailureState {
     pub fn new(alert_after: u32) -> Self {
-        Self { consecutive: 0, alert_after, alerted: false }
+        Self {
+            consecutive: 0,
+            alert_after,
+            alerted: false,
+        }
     }
 
     pub fn record_failure(&mut self) -> Duration {

@@ -72,6 +72,37 @@ pub fn SourcesStrip() -> impl IntoView {
                     .collect_view()
                     .into_any(),
             }}
+            {move || {
+                status
+                    .0
+                    .get()
+                    .flatten()
+                    .filter(|s| s.enrichment_pending > 0)
+                    .map(|s| {
+                        view! {
+                            <span class="badge muted">
+                                {format!("enrichissement : {}", s.enrichment_pending)}
+                            </span>
+                        }
+                    })
+            }}
+            {move || {
+                status
+                    .0
+                    .get()
+                    .flatten()
+                    .and_then(|s| s.llm)
+                    .filter(|l| l.enabled)
+                    .map(|l| {
+                        let model = l.model.clone().unwrap_or_default();
+                        let label = if l.busy > 0 {
+                            format!("LLM ⚙ {model}")
+                        } else {
+                            format!("LLM {model}")
+                        };
+                        view! { <span class="badge muted">{label}</span> }
+                    })
+            }}
         </div>
     }
 }

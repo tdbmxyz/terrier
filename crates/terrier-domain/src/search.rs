@@ -78,7 +78,10 @@ pub fn search_matches(search: &Search, listing: &Listing) -> bool {
         return false;
     }
     if !search.locations.is_empty()
-        && !search.locations.iter().any(|l| location_matches(l, listing))
+        && !search
+            .locations
+            .iter()
+            .any(|l| location_matches(l, listing))
     {
         return false;
     }
@@ -99,8 +102,7 @@ pub fn search_matches(search: &Search, listing: &Listing) -> bool {
             _ => return false,
         }
     }
-    if !search.property_types.is_empty()
-        && !search.property_types.contains(&listing.property_type)
+    if !search.property_types.is_empty() && !search.property_types.contains(&listing.property_type)
     {
         return false;
     }
@@ -179,10 +181,16 @@ mod tests {
     fn criteria_fail_closed_on_missing_attributes() {
         let mut l = listing();
         l.surface_m2 = None;
-        assert!(!search_matches(&search(), &l), "min-surface set, surface unknown");
+        assert!(
+            !search_matches(&search(), &l),
+            "min-surface set, surface unknown"
+        );
         let mut s = search();
         s.min_surface_m2 = None;
-        assert!(search_matches(&s, &l), "criterion unset — missing attr is fine");
+        assert!(
+            search_matches(&s, &l),
+            "criterion unset — missing attr is fine"
+        );
     }
 
     #[test]

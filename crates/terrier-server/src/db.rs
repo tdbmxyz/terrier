@@ -5,11 +5,11 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use chrono::{DateTime, Utc};
+use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
+use sqlx::{Row, SqlitePool};
 use terrier_domain::{
     Flag, Listing, ListingStatus, Moderation, PricePoint, PropertyType, Search, SearchRequest,
 };
-use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
-use sqlx::{Row, SqlitePool};
 use uuid::Uuid;
 
 #[derive(Debug, thiserror::Error)]
@@ -250,7 +250,10 @@ impl Db {
                 .execute(&self.pool)
                 .await?;
                 self.record_price(listing.id, listing.price_cents).await?;
-                let stored = Listing { status: ListingStatus::Active, ..listing.clone() };
+                let stored = Listing {
+                    status: ListingStatus::Active,
+                    ..listing.clone()
+                };
                 Ok((stored, UpsertOutcome::New))
             }
             Some(row) => {
@@ -296,7 +299,9 @@ impl Db {
                 .await?;
                 let outcome = if stored.price_cents != listing.price_cents {
                     self.record_price(stored.id, listing.price_cents).await?;
-                    UpsertOutcome::PriceChanged { old_price_cents: stored.price_cents }
+                    UpsertOutcome::PriceChanged {
+                        old_price_cents: stored.price_cents,
+                    }
                 } else {
                     UpsertOutcome::Unchanged
                 };
@@ -338,7 +343,11 @@ impl Db {
         search_id: Option<Uuid>,
         hidden: bool,
     ) -> Result<Vec<Listing>> {
-        let filter = if hidden { "l.moderation != 'none'" } else { "l.moderation = 'none'" };
+        let filter = if hidden {
+            "l.moderation != 'none'"
+        } else {
+            "l.moderation = 'none'"
+        };
         let rows = match search_id {
             Some(s) => {
                 sqlx::query(&format!(
@@ -371,16 +380,16 @@ impl Db {
         .await?;
         Ok(rows
             .iter()
-            .map(|r| PricePoint { day: r.get("day"), price_cents: r.get("price_cents") })
+            .map(|r| PricePoint {
+                day: r.get("day"),
+                price_cents: r.get("price_cents"),
+            })
             .collect())
     }
 
     /// Price history for many listings at once (the inline sparklines) —
     /// one query, grouped in memory.
-    pub async fn prices_for(
-        &self,
-        listing_ids: &[Uuid],
-    ) -> Result<HashMap<Uuid, Vec<PricePoint>>> {
+    pub async fn prices_for(&self, listing_ids: &[Uuid]) -> Result<HashMap<Uuid, Vec<PricePoint>>> {
         let mut map: HashMap<Uuid, Vec<PricePoint>> = HashMap::new();
         // chunk to stay under SQLite's bind limit
         for chunk in listing_ids.chunks(500) {
@@ -477,11 +486,7 @@ impl Db {
         Ok(())
     }
 
-    pub async fn notified_price(
-        &self,
-        listing_id: Uuid,
-        search_id: Uuid,
-    ) -> Result<Option<i64>> {
+    pub async fn notified_price(&self, listing_id: Uuid, search_id: Uuid) -> Result<Option<i64>> {
         let row = sqlx::query(
             "SELECT notified_price_cents FROM search_matches
              WHERE search_id = ? AND listing_id = ?",
@@ -499,7 +504,12 @@ impl Db {
                 .fetch_all(&self.pool)
                 .await?;
         rows.iter()
-            .map(|r| Ok((parse_uuid(&r.get::<String, _>("search_id"))?, r.get::<i64, _>("n"))))
+            .map(|r| {
+                Ok((
+                    parse_uuid(&r.get::<String, _>("search_id"))?,
+                    r.get::<i64, _>("n"),
+                ))
+            })
             .collect()
     }
 
@@ -515,7 +525,9 @@ impl Db {
         )
         .fetch_all(&self.pool)
         .await?;
-        let cutoff = (Utc::now() - chrono::Duration::days(30)).date_naive().to_string();
+        let cutoff = (Utc::now() - chrono::Duration::days(30))
+            .date_naive()
+            .to_string();
         let old_rows = sqlx::query(
             "SELECT l.commune, p.price_cents, l.surface_m2 FROM listing_prices p
              JOIN listings l ON l.id = p.listing_id
@@ -528,16 +540,18 @@ impl Db {
         let mut now: HashMap<String, (Option<String>, Vec<i64>)> = HashMap::new();
         for r in &rows {
             let commune: String = r.get("commune");
-            let m2 = (r.get::<i64, _>("price_cents") as f64 / r.get::<f64, _>("surface_m2"))
-                .round() as i64;
-            let e = now.entry(commune).or_insert_with(|| (r.get("postal_code"), Vec::new()));
+            let m2 = (r.get::<i64, _>("price_cents") as f64 / r.get::<f64, _>("surface_m2")).round()
+                as i64;
+            let e = now
+                .entry(commune)
+                .or_insert_with(|| (r.get("postal_code"), Vec::new()));
             e.1.push(m2);
         }
         let mut old: HashMap<String, Vec<i64>> = HashMap::new();
         for r in &old_rows {
             let commune: String = r.get("commune");
-            let m2 = (r.get::<i64, _>("price_cents") as f64 / r.get::<f64, _>("surface_m2"))
-                .round() as i64;
+            let m2 = (r.get::<i64, _>("price_cents") as f64 / r.get::<f64, _>("surface_m2")).round()
+                as i64;
             old.entry(commune).or_default().push(m2);
         }
 
@@ -551,13 +565,15 @@ impl Db {
 
         let mut stats: Vec<terrier_domain::CommuneStat> = now
             .into_iter()
-            .map(|(commune, (postal_code, mut m2s))| terrier_domain::CommuneStat {
-                listings: m2s.len() as i64,
-                median_m2_cents: median(&mut m2s),
-                median_m2_cents_30d: old.get(&commune).and_then(|v| median(&mut v.clone())),
-                commune,
-                postal_code,
-            })
+            .map(
+                |(commune, (postal_code, mut m2s))| terrier_domain::CommuneStat {
+                    listings: m2s.len() as i64,
+                    median_m2_cents: median(&mut m2s),
+                    median_m2_cents_30d: old.get(&commune).and_then(|v| median(&mut v.clone())),
+                    commune,
+                    postal_code,
+                },
+            )
             .collect();
         stats.sort_by(|a, b| b.listings.cmp(&a.listings).then(a.commune.cmp(&b.commune)));
         Ok(stats)
@@ -623,7 +639,9 @@ impl Db {
         .bind(limit)
         .fetch_all(&self.pool)
         .await?;
-        rows.iter().map(|r| parse_uuid(&r.get::<String, _>("listing_id"))).collect()
+        rows.iter()
+            .map(|r| parse_uuid(&r.get::<String, _>("listing_id")))
+            .collect()
     }
 
     pub async fn enrichment_done(&self, id: Uuid) -> Result<()> {
@@ -652,7 +670,9 @@ impl Db {
             self.enrichment_done(id).await?;
             return Ok(true);
         }
-        let backoff = 60u64.saturating_mul(2u64.saturating_pow(attempts - 1)).min(21_600);
+        let backoff = 60u64
+            .saturating_mul(2u64.saturating_pow(attempts - 1))
+            .min(21_600);
         sqlx::query(
             "UPDATE enrichment_queue SET attempts = ?, next_attempt_at = ?, last_error = ?
              WHERE listing_id = ?",
@@ -687,19 +707,22 @@ impl Db {
             .get::<Option<String>, _>("extracted_at")
             .map(|s| parse_ts(&s))
             .transpose()?;
-        Ok(EnrichState { listing: row_to_listing(&row)?, enriched_at, extracted_at })
+        Ok(EnrichState {
+            listing: row_to_listing(&row)?,
+            enriched_at,
+            extracted_at,
+        })
     }
 
     /// Merge a detail fetch over the listing; marks the listing enriched.
     /// Returns true when the description changed (extraction re-triggers).
     pub async fn set_detail(&self, id: Uuid, d: &terrier_domain::ListingDetail) -> Result<bool> {
-        let stored: Option<String> =
-            sqlx::query("SELECT description FROM listings WHERE id = ?")
-                .bind(id.to_string())
-                .fetch_optional(&self.pool)
-                .await?
-                .ok_or(DbError::NotFound)?
-                .get("description");
+        let stored: Option<String> = sqlx::query("SELECT description FROM listings WHERE id = ?")
+            .bind(id.to_string())
+            .fetch_optional(&self.pool)
+            .await?
+            .ok_or(DbError::NotFound)?
+            .get("description");
         let changed = d.description.is_some() && d.description != stored;
         if !d.image_urls.is_empty() {
             self.add_image_urls(id, &d.image_urls).await?;
@@ -739,7 +762,11 @@ impl Db {
         .fetch_all(&self.pool)
         .await?;
         let known: HashSet<String> = rows.iter().map(|r| r.get("url")).collect();
-        let mut next = rows.iter().map(|r| r.get::<i64, _>("position")).max().map_or(0, |p| p + 1);
+        let mut next = rows
+            .iter()
+            .map(|r| r.get::<i64, _>("position"))
+            .max()
+            .map_or(0, |p| p + 1);
         for url in urls {
             if known.contains(url) {
                 continue;
@@ -766,7 +793,10 @@ impl Db {
         .bind(limit)
         .fetch_all(&self.pool)
         .await?;
-        Ok(rows.iter().map(|r| (r.get("position"), r.get("url"))).collect())
+        Ok(rows
+            .iter()
+            .map(|r| (r.get("position"), r.get("url")))
+            .collect())
     }
 
     pub async fn mark_image_saved(&self, id: Uuid, position: i64, local_path: &str) -> Result<()> {
@@ -986,30 +1016,50 @@ mod tests {
     #[tokio::test]
     async fn upsert_records_price_history_and_revives() {
         let db = test_db().await;
-        let (l1, o1) = db.upsert_listing(&listing("https://x/1", 30_000_000)).await.unwrap();
+        let (l1, o1) = db
+            .upsert_listing(&listing("https://x/1", 30_000_000))
+            .await
+            .unwrap();
         assert_eq!(o1, UpsertOutcome::New);
 
         // same day, same price → unchanged, one price row
-        let (_, o2) = db.upsert_listing(&listing("https://x/1", 30_000_000)).await.unwrap();
+        let (_, o2) = db
+            .upsert_listing(&listing("https://x/1", 30_000_000))
+            .await
+            .unwrap();
         assert_eq!(o2, UpsertOutcome::Unchanged);
 
         // price drop recorded (same day → latest wins)
-        let (_, o3) = db.upsert_listing(&listing("https://x/1", 29_000_000)).await.unwrap();
-        assert_eq!(o3, UpsertOutcome::PriceChanged { old_price_cents: 30_000_000 });
+        let (_, o3) = db
+            .upsert_listing(&listing("https://x/1", 29_000_000))
+            .await
+            .unwrap();
+        assert_eq!(
+            o3,
+            UpsertOutcome::PriceChanged {
+                old_price_cents: 30_000_000
+            }
+        );
         let prices = db.listing_prices(l1.id).await.unwrap();
         assert_eq!(prices.len(), 1, "one row per day, latest wins");
         assert_eq!(prices[0].price_cents, 29_000_000);
 
         // gone / revive
         assert_eq!(db.mark_gone("src", &HashSet::new()).await.unwrap(), 1);
-        let (l4, _) = db.upsert_listing(&listing("https://x/1", 29_000_000)).await.unwrap();
+        let (l4, _) = db
+            .upsert_listing(&listing("https://x/1", 29_000_000))
+            .await
+            .unwrap();
         assert_eq!(l4.status, ListingStatus::Active);
     }
 
     #[tokio::test]
     async fn moderation_semantics_match_ferret() {
         let db = test_db().await;
-        let (l, _) = db.upsert_listing(&listing("https://x/1", 30_000_000)).await.unwrap();
+        let (l, _) = db
+            .upsert_listing(&listing("https://x/1", 30_000_000))
+            .await
+            .unwrap();
         let s = db
             .create_search(&SearchRequest {
                 name: "s".into(),
@@ -1024,18 +1074,29 @@ mod tests {
             .unwrap();
         db.insert_match(l.id, s.id).await.unwrap();
 
-        db.set_moderation(l.id, Moderation::Dismissed).await.unwrap();
+        db.set_moderation(l.id, Moderation::Dismissed)
+            .await
+            .unwrap();
         assert!(db.list_listings(None, false).await.unwrap().is_empty());
         assert_eq!(db.list_listings(None, true).await.unwrap().len(), 1);
-        assert!(db.count_matches().await.unwrap().is_empty(), "matches dropped");
+        assert!(
+            db.count_matches().await.unwrap().is_empty(),
+            "matches dropped"
+        );
 
         // dismissal clears on gone + re-acquire; ban survives it
         db.mark_gone("src", &HashSet::new()).await.unwrap();
-        let (l2, _) = db.upsert_listing(&listing("https://x/1", 30_000_000)).await.unwrap();
+        let (l2, _) = db
+            .upsert_listing(&listing("https://x/1", 30_000_000))
+            .await
+            .unwrap();
         assert_eq!(l2.moderation, Moderation::None);
         db.set_moderation(l.id, Moderation::Banned).await.unwrap();
         db.mark_gone("src", &HashSet::new()).await.unwrap();
-        let (l3, _) = db.upsert_listing(&listing("https://x/1", 30_000_000)).await.unwrap();
+        let (l3, _) = db
+            .upsert_listing(&listing("https://x/1", 30_000_000))
+            .await
+            .unwrap();
         assert_eq!(l3.moderation, Moderation::Banned);
     }
 
@@ -1043,7 +1104,9 @@ mod tests {
     async fn commune_stats_median() {
         let db = test_db().await;
         // 3 listings in Bruz: 110m²@300k, 100m²@350k, 50m²@200k
-        db.upsert_listing(&listing("https://x/1", 30_000_000)).await.unwrap();
+        db.upsert_listing(&listing("https://x/1", 30_000_000))
+            .await
+            .unwrap();
         let mut l2 = listing("https://x/2", 35_000_000);
         l2.surface_m2 = Some(100.0);
         db.upsert_listing(&l2).await.unwrap();
@@ -1086,8 +1149,14 @@ mod tests {
 
         // …and a later re-scrape with the truncated body must NOT clobber it
         let (again, _) = db.upsert_listing(&l).await.unwrap();
-        assert_eq!(again.description.as_deref(), Some("the full, longer description"));
-        assert_eq!(again.seller.as_ref().unwrap().name.as_deref(), Some("Agence X"));
+        assert_eq!(
+            again.description.as_deref(),
+            Some("the full, longer description")
+        );
+        assert_eq!(
+            again.seller.as_ref().unwrap().name.as_deref(),
+            Some("Agence X")
+        );
 
         // a later re-scrape with a *different* seller (private, no siren)
         // must replace the stored seller atomically — not leave a stale
@@ -1104,13 +1173,19 @@ mod tests {
         let seller = stored.seller.as_ref().expect("seller present");
         assert_eq!(seller.kind, terrier_domain::SellerKind::Private);
         assert_eq!(seller.name.as_deref(), Some("Jean"));
-        assert_eq!(seller.siren, None, "stale pro siren must not survive a seller change");
+        assert_eq!(
+            seller.siren, None,
+            "stale pro siren must not survive a seller change"
+        );
     }
 
     #[tokio::test]
     async fn enrichment_queue_lifecycle() {
         let db = test_db().await;
-        let (l, _) = db.upsert_listing(&listing("https://x/1", 30_000_000)).await.unwrap();
+        let (l, _) = db
+            .upsert_listing(&listing("https://x/1", 30_000_000))
+            .await
+            .unwrap();
         db.enqueue_enrichment(l.id, "new").await.unwrap();
         assert_eq!(db.enrichment_depth().await.unwrap(), 1);
         assert_eq!(db.due_enrichment("src", 10).await.unwrap(), vec![l.id]);
@@ -1135,7 +1210,10 @@ mod tests {
     #[tokio::test]
     async fn reenqueue_resets_attempt_budget() {
         let db = test_db().await;
-        let (l, _) = db.upsert_listing(&listing("https://x/1", 30_000_000)).await.unwrap();
+        let (l, _) = db
+            .upsert_listing(&listing("https://x/1", 30_000_000))
+            .await
+            .unwrap();
         db.enqueue_enrichment(l.id, "new").await.unwrap();
         for _ in 0..7 {
             db.enrichment_failed(l.id, "boom", 8).await.unwrap();
@@ -1151,24 +1229,50 @@ mod tests {
     #[tokio::test]
     async fn price_change_enqueue_clears_enriched_at() {
         let db = test_db().await;
-        let (l, _) = db.upsert_listing(&listing("https://x/1", 30_000_000)).await.unwrap();
-        db.set_detail(l.id, &terrier_domain::ListingDetail::default()).await.unwrap();
-        assert!(db.enrichment_state(l.id).await.unwrap().enriched_at.is_some());
+        let (l, _) = db
+            .upsert_listing(&listing("https://x/1", 30_000_000))
+            .await
+            .unwrap();
+        db.set_detail(l.id, &terrier_domain::ListingDetail::default())
+            .await
+            .unwrap();
+        assert!(
+            db.enrichment_state(l.id)
+                .await
+                .unwrap()
+                .enriched_at
+                .is_some()
+        );
         db.enqueue_enrichment(l.id, "price-change").await.unwrap();
-        assert!(db.enrichment_state(l.id).await.unwrap().enriched_at.is_none());
+        assert!(
+            db.enrichment_state(l.id)
+                .await
+                .unwrap()
+                .enriched_at
+                .is_none()
+        );
     }
 
     #[tokio::test]
     async fn detail_merge_images_and_extraction_state() {
         let db = test_db().await;
-        let (l, _) = db.upsert_listing(&listing("https://x/1", 30_000_000)).await.unwrap();
-        db.add_image_urls(l.id, &["https://cdn/a.jpg".into(), "https://cdn/b.jpg".into()])
+        let (l, _) = db
+            .upsert_listing(&listing("https://x/1", 30_000_000))
             .await
             .unwrap();
+        db.add_image_urls(
+            l.id,
+            &["https://cdn/a.jpg".into(), "https://cdn/b.jpg".into()],
+        )
+        .await
+        .unwrap();
         // idempotent by url, new urls append after existing positions
-        db.add_image_urls(l.id, &["https://cdn/b.jpg".into(), "https://cdn/c.jpg".into()])
-            .await
-            .unwrap();
+        db.add_image_urls(
+            l.id,
+            &["https://cdn/b.jpg".into(), "https://cdn/c.jpg".into()],
+        )
+        .await
+        .unwrap();
         let pending = db.pending_images(l.id, 10).await.unwrap();
         assert_eq!(
             pending,
@@ -1185,19 +1289,44 @@ mod tests {
         assert_eq!(by_listing[&l.id][0].local_path.as_deref(), Some("xx/0.jpg"));
 
         // a changed description resets extraction; same description doesn't
-        let attrs = terrier_domain::ExtractedAttrs { fibre: Some(true), ..Default::default() };
+        let attrs = terrier_domain::ExtractedAttrs {
+            fibre: Some(true),
+            ..Default::default()
+        };
         db.set_attributes(l.id, &attrs).await.unwrap();
-        assert!(db.enrichment_state(l.id).await.unwrap().extracted_at.is_some());
+        assert!(
+            db.enrichment_state(l.id)
+                .await
+                .unwrap()
+                .extracted_at
+                .is_some()
+        );
         let detail = terrier_domain::ListingDetail {
             description: Some("desc v1".into()),
             ..Default::default()
         };
         assert!(db.set_detail(l.id, &detail).await.unwrap());
         let st = db.enrichment_state(l.id).await.unwrap();
-        assert!(st.extracted_at.is_none(), "new description re-triggers extraction");
-        assert_eq!(st.listing.attributes.fibre, Some(true), "old attrs kept meanwhile");
+        assert!(
+            st.extracted_at.is_none(),
+            "new description re-triggers extraction"
+        );
+        assert_eq!(
+            st.listing.attributes.fibre,
+            Some(true),
+            "old attrs kept meanwhile"
+        );
         db.set_attributes(l.id, &attrs).await.unwrap();
-        assert!(!db.set_detail(l.id, &detail).await.unwrap(), "same description: no change");
-        assert!(db.enrichment_state(l.id).await.unwrap().extracted_at.is_some());
+        assert!(
+            !db.set_detail(l.id, &detail).await.unwrap(),
+            "same description: no change"
+        );
+        assert!(
+            db.enrichment_state(l.id)
+                .await
+                .unwrap()
+                .extracted_at
+                .is_some()
+        );
     }
 }

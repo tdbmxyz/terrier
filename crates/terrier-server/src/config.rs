@@ -55,7 +55,11 @@ pub struct ScrapeConfig {
 
 impl Default for ScrapeConfig {
     fn default() -> Self {
-        Self { failure_alert_after: 5, renotify_drop_pct: 1.0, max_search_locations: 20 }
+        Self {
+            failure_alert_after: 5,
+            renotify_drop_pct: 1.0,
+            max_search_locations: 20,
+        }
     }
 }
 
@@ -183,7 +187,10 @@ mod tests {
         assert_eq!(config.listen.port(), 4810);
         assert!(!config.leboncoin.enabled, "sources are opt-in");
         assert!(!config.ouestfrance.enabled);
-        assert!(config.notifications.ntfy_url.is_none(), "notifications opt-in");
+        assert!(
+            config.notifications.ntfy_url.is_none(),
+            "notifications opt-in"
+        );
         assert!(!config.llm.enabled);
     }
 }

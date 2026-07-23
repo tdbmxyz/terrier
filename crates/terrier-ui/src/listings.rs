@@ -213,7 +213,9 @@ fn ListingCard(item: ListingWithHistory) -> impl IntoView {
     let base = client.base().clone();
     let img_src = move |url: &str| -> String {
         if url.starts_with('/') {
-            base.join(url).map(|u| u.to_string()).unwrap_or_else(|_| url.to_string())
+            base.join(url)
+                .map(|u| u.to_string())
+                .unwrap_or_else(|_| url.to_string())
         } else {
             url.to_string()
         }
@@ -256,8 +258,9 @@ fn ListingCard(item: ListingWithHistory) -> impl IntoView {
 
     let delta = history.first().and_then(|first| {
         if first.price_cents > 0 && first.price_cents != listing.price_cents {
-            Some((listing.price_cents - first.price_cents) as f64 / first.price_cents as f64
-                * 100.0)
+            Some(
+                (listing.price_cents - first.price_cents) as f64 / first.price_cents as f64 * 100.0,
+            )
         } else {
             None
         }

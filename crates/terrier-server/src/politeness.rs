@@ -38,7 +38,10 @@ impl<S> tower::Layer<S> for PolitenessLayer {
     type Service = Politeness<S>;
 
     fn layer(&self, inner: S) -> Self::Service {
-        Politeness { inner, state: self.state.clone() }
+        Politeness {
+            inner,
+            state: self.state.clone(),
+        }
     }
 }
 

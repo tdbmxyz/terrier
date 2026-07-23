@@ -31,7 +31,10 @@ pub fn location_slug(raw: &str) -> String {
 }
 
 pub fn search_url(location: &str) -> String {
-    format!("https://www.ouestfrance-immo.com/acheter/{}/", location_slug(location))
+    format!(
+        "https://www.ouestfrance-immo.com/acheter/{}/",
+        location_slug(location)
+    )
 }
 
 /// Extract listings from schema.org JSON-LD blocks in a rendered page.
@@ -41,11 +44,13 @@ pub fn parse_page(html: &str) -> anyhow::Result<Vec<RawListing>> {
     let mut found_ld = false;
     while let Some(start) = rest.find(r#"application/ld+json"#) {
         let after = &rest[start..];
-        let Some(json_start) = after.find('>') else { break };
-        let Some(json_end) = after.find("</script>") else { break };
-        if let Ok(v) = serde_json::from_str::<serde_json::Value>(
-            &after[json_start + 1..json_end],
-        ) {
+        let Some(json_start) = after.find('>') else {
+            break;
+        };
+        let Some(json_end) = after.find("</script>") else {
+            break;
+        };
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&after[json_start + 1..json_end]) {
             found_ld = true;
             collect_offers(&v, &mut listings);
         }
@@ -83,7 +88,10 @@ fn collect_offers(v: &serde_json::Value, out: &mut Vec<RawListing>) {
 
 fn offer_to_listing(v: &serde_json::Value) -> Option<RawListing> {
     let ty = v["@type"].as_str()?;
-    if !matches!(ty, "Product" | "Offer" | "House" | "Apartment" | "SingleFamilyResidence") {
+    if !matches!(
+        ty,
+        "Product" | "Offer" | "House" | "Apartment" | "SingleFamilyResidence"
+    ) {
         return None;
     }
     let name = v["name"].as_str()?;
@@ -180,7 +188,11 @@ impl ImmoSource for OuestFranceSource {
         for location in &locations {
             tokio::time::sleep(std::time::Duration::from_millis(self.config.delay_ms)).await;
             let html = self.fetch_page(&search_url(location)).await?;
-            all.extend(parse_page(&html)?.into_iter().filter(|l| seen.insert(l.url.clone())));
+            all.extend(
+                parse_page(&html)?
+                    .into_iter()
+                    .filter(|l| seen.insert(l.url.clone())),
+            );
         }
         Ok(all)
     }

@@ -101,7 +101,10 @@ mod tests {
             token_file: None,
         };
         let notifier = NtfyNotifier::new(&config).unwrap().unwrap();
-        assert_eq!(notifier.endpoint.as_str(), "https://notify.zeus.balem.fr/deals-zeus");
+        assert_eq!(
+            notifier.endpoint.as_str(),
+            "https://notify.zeus.balem.fr/deals-zeus"
+        );
     }
 
     #[test]

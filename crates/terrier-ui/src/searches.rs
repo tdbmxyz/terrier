@@ -9,8 +9,11 @@ use terrier_domain::{PropertyType, Search, SearchRequest};
 
 use crate::{DataVersion, format_price};
 
-const ALL_TYPES: [PropertyType; 3] =
-    [PropertyType::House, PropertyType::Apartment, PropertyType::Land];
+const ALL_TYPES: [PropertyType; 3] = [
+    PropertyType::House,
+    PropertyType::Apartment,
+    PropertyType::Land,
+];
 
 #[derive(Clone, Copy)]
 struct EditRequest(RwSignal<Option<Search>>);
@@ -78,10 +81,16 @@ fn SearchForm() -> impl IntoView {
         name.set(search.name.clone());
         locations.set(search.locations.join(", "));
         max_price.set(
-            search.max_price_cents.map(|c| (c / 100).to_string()).unwrap_or_default(),
+            search
+                .max_price_cents
+                .map(|c| (c / 100).to_string())
+                .unwrap_or_default(),
         );
         min_surface.set(
-            search.min_surface_m2.map(|s| format!("{s:.0}")).unwrap_or_default(),
+            search
+                .min_surface_m2
+                .map(|s| format!("{s:.0}"))
+                .unwrap_or_default(),
         );
         min_rooms.set(search.min_rooms.map(|r| r.to_string()).unwrap_or_default());
         types.set(search.property_types.clone());
@@ -230,7 +239,12 @@ fn search_row(search: Search) -> impl IntoView {
     }
     if !search.property_types.is_empty() {
         criteria.push(
-            search.property_types.iter().map(|t| t.label()).collect::<Vec<_>>().join("/"),
+            search
+                .property_types
+                .iter()
+                .map(|t| t.label())
+                .collect::<Vec<_>>()
+                .join("/"),
         );
     }
 

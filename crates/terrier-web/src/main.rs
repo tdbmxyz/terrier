@@ -1,5 +1,5 @@
-use terrier_ui::{App, AppConfig};
 use leptos::prelude::*;
+use terrier_ui::{App, AppConfig};
 use url::Url;
 
 /// Where the terrier API lives, resolved in order:
@@ -46,6 +46,8 @@ fn resolve() -> Url {
 
 fn main() {
     console_error_panic_hook::set_once();
-    let config = AppConfig { api_base: resolve() };
+    let config = AppConfig {
+        api_base: resolve(),
+    };
     mount_to_body(move || view! { <App config=config.clone()/> });
 }

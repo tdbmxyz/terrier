@@ -72,10 +72,18 @@ pub struct EffectiveLlm {
 /// a disabled pass.
 pub fn effective(base: &LlmConfig, o: Option<&LlmSettingsUpdate>) -> anyhow::Result<EffectiveLlm> {
     let pick = |over: &str, conf: &str| {
-        if over.trim().is_empty() { conf.to_string() } else { over.trim().to_string() }
+        if over.trim().is_empty() {
+            conf.to_string()
+        } else {
+            over.trim().to_string()
+        }
     };
     let (enabled, base_url, model) = match o {
-        Some(o) => (o.enabled, pick(&o.base_url, &base.base_url), pick(&o.model, &base.model)),
+        Some(o) => (
+            o.enabled,
+            pick(&o.base_url, &base.base_url),
+            pick(&o.model, &base.model),
+        ),
         None => (base.enabled, base.base_url.clone(), base.model.clone()),
     };
     let override_key = o.and_then(|o| o.api_key.clone()).filter(|k| !k.is_empty());
@@ -118,7 +126,11 @@ pub struct LlmRuntime {
 
 pub type LlmHandle = std::sync::Arc<tokio::sync::RwLock<LlmRuntime>>;
 
-pub fn build_runtime(eff: EffectiveLlm, prompts: LlmPrompts, db: Option<crate::db::Db>) -> LlmRuntime {
+pub fn build_runtime(
+    eff: EffectiveLlm,
+    prompts: LlmPrompts,
+    db: Option<crate::db::Db>,
+) -> LlmRuntime {
     let busy = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
     let extractor = eff.enabled.then(|| {
         std::sync::Arc::new(OpenAiExtractor {
@@ -170,8 +182,7 @@ pub async fn load_prompts(db: &crate::db::Db) -> Option<LlmPrompts> {
 
 // ---- system prompt: default here, user-overridable via settings ----
 
-pub const EXTRACT_PROMPT: &str =
-    "You extract structured facts from a French real-estate SALE listing for \
+pub const EXTRACT_PROMPT: &str = "You extract structured facts from a French real-estate SALE listing for \
      a price tracker. Fill ONLY what the text explicitly states — never \
      guess, never infer from what is typical; absent from the text means \
      null (empty list for notes).\n\
@@ -192,13 +203,17 @@ pub const EXTRACT_PROMPT: &str =
      Answer only with the JSON object.";
 
 pub fn default_prompts() -> LlmPrompts {
-    LlmPrompts { extract: EXTRACT_PROMPT.into() }
+    LlmPrompts {
+        extract: EXTRACT_PROMPT.into(),
+    }
 }
 
 /// Stored override merged over the defaults (empty field = default).
 pub fn effective_prompts(stored: Option<&LlmPrompts>) -> LlmPrompts {
     let defaults = default_prompts();
-    let Some(stored) = stored else { return defaults };
+    let Some(stored) = stored else {
+        return defaults;
+    };
     LlmPrompts {
         extract: if stored.extract.trim().is_empty() {
             defaults.extract
@@ -368,11 +383,16 @@ impl OpenAiExtractor {
         let status = response.status();
         let text = response.text().await.unwrap_or_default();
         if !status.is_success() {
-            anyhow::bail!("{status}: {}", text.chars().take(300).collect::<String>().trim());
+            anyhow::bail!(
+                "{status}: {}",
+                text.chars().take(300).collect::<String>().trim()
+            );
         }
         if let Ok(v) = serde_json::from_str::<serde_json::Value>(&text)
-            && let (Some(p), Some(c)) =
-                (v["usage"]["prompt_tokens"].as_i64(), v["usage"]["completion_tokens"].as_i64())
+            && let (Some(p), Some(c)) = (
+                v["usage"]["prompt_tokens"].as_i64(),
+                v["usage"]["completion_tokens"].as_i64(),
+            )
         {
             *usage = Some((p, c));
         }
@@ -437,7 +457,9 @@ impl OpenAiExtractor {
             return Err(first);
         }
         tracing::debug!(error = %first, "structured attempt failed — retrying plain");
-        body.as_object_mut().expect("chat body is an object").remove("response_format");
+        body.as_object_mut()
+            .expect("chat body is an object")
+            .remove("response_format");
         let content = self
             .post_chat(&body, usage)
             .await
@@ -450,7 +472,10 @@ impl OpenAiExtractor {
 impl LlmExtract for OpenAiExtractor {
     async fn extract(&self, input: &ExtractInput<'_>) -> anyhow::Result<ExtractedAttrs> {
         let raw: RawExtraction = self
-            .chat_json("extract", request_body(&self.model, input, &self.prompts.extract))
+            .chat_json(
+                "extract",
+                request_body(&self.model, input, &self.prompts.extract),
+            )
             .await?;
         Ok(raw.into())
     }
@@ -477,7 +502,10 @@ pub async fn list_models(base_url: &str, api_key: Option<&str>) -> anyhow::Resul
     let status = response.status();
     let text = response.text().await.unwrap_or_default();
     if !status.is_success() {
-        anyhow::bail!("{status}: {}", text.chars().take(300).collect::<String>().trim());
+        anyhow::bail!(
+            "{status}: {}",
+            text.chars().take(300).collect::<String>().trim()
+        );
     }
     let v: serde_json::Value = serde_json::from_str(&text)?;
     let mut models: Vec<String> = v["data"]
@@ -508,7 +536,10 @@ pub async fn probe(base_url: &str, model: &str, api_key: Option<&str>) -> anyhow
     let status = response.status();
     let text = response.text().await.unwrap_or_default();
     if !status.is_success() {
-        anyhow::bail!("{status}: {}", text.chars().take(300).collect::<String>().trim());
+        anyhow::bail!(
+            "{status}: {}",
+            text.chars().take(300).collect::<String>().trim()
+        );
     }
     content_of(&text).map(|_| ())
 }
@@ -556,7 +587,10 @@ mod tests {
             extract_json("Sure! Here: {\"a\": {\"b\": 2}} hope it helps"),
             "{\"a\": {\"b\": 2}}"
         );
-        assert_eq!(extract_json("<think>Hmm {tricky}</think>\n{\"a\": 1}"), "{\"a\": 1}");
+        assert_eq!(
+            extract_json("<think>Hmm {tricky}</think>\n{\"a\": 1}"),
+            "{\"a\": 1}"
+        );
         assert_eq!(extract_json("no json at all"), "no json at all");
     }
 
@@ -602,7 +636,10 @@ mod tests {
 
     #[test]
     fn override_supersedes_config_blank_fields_fall_back() {
-        let base = LlmConfig { model: "conf-model".into(), ..Default::default() };
+        let base = LlmConfig {
+            model: "conf-model".into(),
+            ..Default::default()
+        };
         let o = LlmSettingsUpdate {
             enabled: true,
             base_url: "http://zeus:8080/v1".into(),
@@ -612,7 +649,10 @@ mod tests {
         let eff = effective(&base, Some(&o)).unwrap();
         assert!(eff.enabled, "override enables a config-disabled pass");
         assert_eq!(eff.base_url, "http://zeus:8080/v1");
-        assert_eq!(eff.model, "conf-model", "blank override field falls back to TOML");
+        assert_eq!(
+            eff.model, "conf-model",
+            "blank override field falls back to TOML"
+        );
         assert_eq!(eff.api_key.as_deref(), Some("sk-x"));
 
         let runtime = build_runtime(eff, default_prompts(), None);
@@ -623,9 +663,13 @@ mod tests {
 
     #[test]
     fn prompt_override_merges_over_default() {
-        let stored = LlmPrompts { extract: "  ".into() };
+        let stored = LlmPrompts {
+            extract: "  ".into(),
+        };
         assert_eq!(effective_prompts(Some(&stored)).extract, EXTRACT_PROMPT);
-        let stored = LlmPrompts { extract: "custom".into() };
+        let stored = LlmPrompts {
+            extract: "custom".into(),
+        };
         assert_eq!(effective_prompts(Some(&stored)).extract, "custom");
     }
 }

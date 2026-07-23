@@ -39,3 +39,12 @@ Searches are structured (communes + prix max + surface min + pièces +
 types); their locations join the scrape rotation automatically. Matching
 fails closed on missing attributes, wanted ads ("Recherche maison…")
 never notify, and dismiss/ban moderation is built in.
+
+## Enrichment
+
+New listings and price changes are queued for detail-page enrichment:
+photos are downloaded under `images_dir` and served at `/images`, and
+(optionally) a local OpenAI-compatible endpoint (e.g. llama.cpp) extracts
+structured French listing attributes from the description text. This is
+fail-open — scraping never depends on it. Configure it in the `[llm]`
+section of `terrier.toml`, or live from the Réglages tab in the UI.
